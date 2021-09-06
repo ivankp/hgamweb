@@ -17,8 +17,7 @@ EXE := $(shell $(FIND_MAIN))
 
 all: $(EXE)
 
-# bin/hgamweb: $(patsubst %, .build/%.o, \
-# )
+bin/hgamweb: $(patsubst %, .build/%.o, linalg wls)
 # LF_hgamweb := -static-libstdc++ -static-libgcc
 # L_hgamweb :=
 

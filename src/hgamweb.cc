@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
+#include <cmath>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -11,13 +12,16 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "linalg.hh"
+#include "wls.hh"
 #include "error.hh"
 
 using std::cout;
 using std::cerr;
 using std::endl;
 // using std::get;
-using ivanp::cat;
+// using ivanp::cat;
+using ivanp::sq;
 
 bool is_mc;
 double lumi_data = 0, lumi_mc = 0;
@@ -89,10 +93,24 @@ std::vector<double> getnums(std::string_view s) {
   return v;
 }
 
+constexpr unsigned overflow = -1;
+unsigned find_bin(double x, double a, double b, unsigned n) noexcept {
+  // if (x < a) return 0;
+  // if (!(x < b)) return n + 1u;
+  // return unsigned(n*(x-a)/(b-a)) + 1u;
+  if (x < a || !(x < b)) return overflow;
+  return n*(x-a)/(b-a);
+}
+unsigned find_bin(double x, double* e, unsigned n) noexcept {
+  return std::upper_bound(e,e+n,x) - e;
+}
+double center(unsigned i, double a, double b, unsigned n) noexcept {
+  return a + (i*2+1)*(b-a)/(n*2);
+}
+
 int main(int argc, char* argv[]) {
-  if (argc<4) {
-    cout << "usage: " << argv[0] <<
-      " bin_edges S_params events.dat ...\n";
+  if (argc<2) {
+    cout << "usage: " << argv[0] << " files ...\n";
     return 1;
   }
 
@@ -100,30 +118,92 @@ int main(int argc, char* argv[]) {
   using tpoint = std::chrono::time_point<clock>;
   const tpoint start = clock::now();
 
-  auto edges = getnums(argv[1]);
-  if (edges.size()<2) THROW("need at least two edges");
-  std::sort(edges.begin(),edges.end());
-  for (auto x : edges) TEST(x)
-  auto S = getnums(argv[2]);
-  if (S.size()!=6) THROW("DSCB needs 6 parameters");
-  for (auto x : S) TEST(x)
+  // for (auto x : getnums(argv[1])) TEST(x)
 
-  for (int argi=3; argi<argc; ++argi) {
+  // auto edges = getnums(argv[2]);
+  // if (edges.size()<2) THROW("need at least two edges");
+  // std::sort(edges.begin(),edges.end());
+  // for (auto x : edges) TEST(x)
+  // auto S = getnums(argv[2]);
+  // if (S.size()!=6) THROW("DSCB needs 6 parameters");
+  // for (auto x : S) TEST(x)
+
+  unsigned nS = 20;
+  double* histS = new double[nS];
+
+  for (int argi=1; argi<argc; ++argi) {
     file events(argv[argi]);
     if (is_mc) {
+      double m[3] { };
       for (auto [event,end] = *events; event!=end; event+=4) {
-        myy    = event[0];
+        myy    = event[0] - 125.;
         var    = event[1];
         truth  = event[2];
         weight = event[3];
+
+        unsigned i = find_bin(myy,-2,2,nS);
+        if (i!=overflow) histS[i] += weight;
+
+        double dm = weight;
+        for (int i=0;;) {
+          m[i] += dm;
+          if (++i > 2) break;
+          dm *= myy;
+        }
       }
+      m[1] /= m[0];
+      m[2] = m[2]/m[0] - m[1]*m[1];
+      TEST(m[1])
+      TEST(m[2])
     } else {
       for (auto [event,end] = *events; event!=end; event+=2) {
-        myy    = event[0];
+        myy    = event[0] - 125.;
         var    = event[1];
       }
     }
   }
+
+  double* log_us = new double[nS];
+  for (unsigned i=0; i<nS; ++i) {
+    double y = histS[i];
+    log_us[i] = 1./y;
+    histS[i] = std::log(y);
+  }
+
+  double cs[3];
+  const unsigned nc = std::size(cs);
+  double* const A = new double[nS*nc];
+  { double* a = A;
+    for (unsigned i=0; i<nS; ++i)
+      *a++ = 1;
+    for (unsigned i=0; i<nS; ++i) {
+      double x = center(i,-2,2,nS);
+      *a++ = x;
+      *(a+nS) = x*x;
+    }
+  }
+
+  ivanp::wls(A, histS, log_us, nS, nc, cs);
+
+  cout << "cs = [";
+  for (unsigned i=0; i<nc; ++i) {
+    if (i) cout << ',';
+    cout << cs[i];
+  }
+  cout << ']' << endl;
+  cout << "hist = [";
+  for (unsigned i=0; i<nS; ++i) {
+    if (i) cout << ',';
+    cout << histS[i];
+  }
+  cout << ']' << endl;
+
+  double σ² = -cs[2]*2;
+  double μ  =  cs[1]*σ²;
+  cout << "σ² = " << σ² << '\n';
+  cout << "μ  = " << μ << endl;
+
+  delete[] histS;
 
   const auto time = std::chrono::duration<double>(clock::now()-start).count();
   TEST(time)
