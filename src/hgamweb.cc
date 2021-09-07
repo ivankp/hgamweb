@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "linalg.hh"
+// #include "linalg.hh"
 #include "wls.hh"
 #include "error.hh"
 
@@ -21,7 +21,7 @@ using std::cerr;
 using std::endl;
 // using std::get;
 // using ivanp::cat;
-using ivanp::sq;
+// using ivanp::sq;
 
 bool is_mc;
 double lumi_data = 0, lumi_mc = 0;
@@ -128,81 +128,93 @@ int main(int argc, char* argv[]) {
   // if (S.size()!=6) THROW("DSCB needs 6 parameters");
   // for (auto x : S) TEST(x)
 
-  unsigned nS = 20;
+  unsigned nS = 110;
   double* histS = new double[nS];
+
+  unsigned nB = 110;
+  double* histB = new double[nB];
+
+  double mS[3] { };
 
   for (int argi=1; argi<argc; ++argi) {
     file events(argv[argi]);
     if (is_mc) {
-      double m[3] { };
       for (auto [event,end] = *events; event!=end; event+=4) {
         myy    = event[0] - 125.;
         var    = event[1];
         truth  = event[2];
         weight = event[3];
 
-        unsigned i = find_bin(myy,-2,2,nS);
+        unsigned i = find_bin(myy,-20,35,nS);
         if (i!=overflow) histS[i] += weight;
 
         double dm = weight;
         for (int i=0;;) {
-          m[i] += dm;
+          mS[i] += dm;
           if (++i > 2) break;
           dm *= myy;
         }
       }
-      m[1] /= m[0];
-      m[2] = m[2]/m[0] - m[1]*m[1];
-      TEST(m[1])
-      TEST(m[2])
     } else {
       for (auto [event,end] = *events; event!=end; event+=2) {
         myy    = event[0] - 125.;
         var    = event[1];
+
+        unsigned i = find_bin(myy,-20,35,nB);
+        if (i!=overflow) ++histB[i];
       }
     }
   }
 
-  double* log_us = new double[nS];
-  for (unsigned i=0; i<nS; ++i) {
-    double y = histS[i];
-    log_us[i] = 1./y;
-    histS[i] = std::log(y);
-  }
+  mS[1] /= mS[0];
+  mS[2] = mS[2]/mS[0] - mS[1]*mS[1];
+  TEST(mS[1])
+  TEST(mS[2])
 
-  double cs[3];
+  double cs[4];
   const unsigned nc = std::size(cs);
-  double* const A = new double[nS*nc];
-  { double* a = A;
-    for (unsigned i=0; i<nS; ++i)
-      *a++ = 1;
-    for (unsigned i=0; i<nS; ++i) {
-      double x = center(i,-2,2,nS);
-      *a++ = x;
-      *(a+nS) = x*x;
+  { const unsigned nb[3] {
+      nB*(121-105)/(160-105),
+      nB*(129-121)/(160-105),
+      nB*(160-129)/(160-105)
+    };
+    const unsigned nB2 = nb[0]+nb[2];
+    double* ys = new double[nB2];
+    double* us = new double[nB2];
+    double* A = new double[nB2*nc];
+    for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
+      if (j == nb[0]) j += nb[1];
+      double y = histB[j],
+            *a = A + i,
+             x = center(j,-20,35,nB),
+             f = 1;
+      ys[i] = y;
+      us[i] = y ?: 1.;
+      for (unsigned j=0;;) {
+        *a = f;
+        if (++j >= nc) break;
+        a += nB2;
+        f *= x;
+      }
     }
+    ivanp::wls(A, ys, us, nB2, nc, cs);
+    delete[] us;
   }
 
-  ivanp::wls(A, histS, log_us, nS, nc, cs);
-
+  cout << "hist = [";
+  for (unsigned i=0; i<nB; ++i) {
+    if (i) cout << ',';
+    cout << histB[i];
+  }
+  cout << ']' << endl;
   cout << "cs = [";
   for (unsigned i=0; i<nc; ++i) {
     if (i) cout << ',';
     cout << cs[i];
   }
   cout << ']' << endl;
-  cout << "hist = [";
-  for (unsigned i=0; i<nS; ++i) {
-    if (i) cout << ',';
-    cout << histS[i];
-  }
-  cout << ']' << endl;
 
-  double σ² = -cs[2]*2;
-  double μ  =  cs[1]*σ²;
-  cout << "σ² = " << σ² << '\n';
-  cout << "μ  = " << μ << endl;
-
+  delete[] histB;
   delete[] histS;
 
   const auto time = std::chrono::duration<double>(clock::now()-start).count();
