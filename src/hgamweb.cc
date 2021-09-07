@@ -2,10 +2,13 @@
 #include <cstdlib>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <chrono>
 #include <charconv>
+#include <filesystem>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -14,31 +17,29 @@
 
 // #include "linalg.hh"
 #include "wls.hh"
+#include "json.hh"
 #include "error.hh"
 
 using std::cout;
 using std::cerr;
 using std::endl;
 // using std::get;
-// using ivanp::cat;
+using ivanp::cat;
 // using ivanp::sq;
 
-bool is_mc;
 double lumi_data = 0, lumi_mc = 0;
-double myy, var, truth, weight;
 
 static_assert(sizeof(float )==4);
 static_assert(sizeof(double)==8);
 
-struct file {
-  char* m; size_t n;
-  file(const char* filename) {
+struct reader {
+  char* m; size_t n; bool is_mc;
+  reader(const char* filename) {
     const int fd = ::open(filename,O_RDONLY);
     if (fd < 0) THROW_ERRNO("open",filename);
 
     struct stat sb;
     if (::fstat(fd,&sb) < 0) THROW_ERRNO("fstat",filename);
-    // if (!S_ISREG(sb.st_mode)) THROW(filename,": not a regular file");
 
     const size_t len = sb.st_size;
     if (len < 16) THROW(filename,": file is too short");
@@ -66,7 +67,7 @@ struct file {
 
     ::close(fd);
   }
-  ~file() { ::free(m); }
+  ~reader() { ::free(m); }
   struct range { float *begin, *end; };
   range operator*() const {
     float* a = reinterpret_cast<float*>(m+16);
@@ -74,30 +75,8 @@ struct file {
   }
 };
 
-std::vector<double> getnums(std::string_view s) {
-  std::vector<double> v;
-  double x;
-  const char *p = s.data(), *end = p+s.size();
-  while (p!=end) {
-    char c = *p;
-    if (c==' ' || c=='\t' || c==',' || c==';' || c=='\n' || c=='\r') {
-      ++p;
-      continue;
-    }
-    auto [ptr,ec] = std::from_chars(p,end,x);
-    if (ec == std::errc{}) {
-      v.push_back(x);
-      p = ptr;
-    } else THROW("invalid string: ",s);
-  }
-  return v;
-}
-
 constexpr unsigned overflow = -1;
 unsigned find_bin(double x, double a, double b, unsigned n) noexcept {
-  // if (x < a) return 0;
-  // if (!(x < b)) return n + 1u;
-  // return unsigned(n*(x-a)/(b-a)) + 1u;
   if (x < a || !(x < b)) return overflow;
   return n*(x-a)/(b-a);
 }
@@ -109,8 +88,8 @@ double center(unsigned i, double a, double b, unsigned n) noexcept {
 }
 
 int main(int argc, char* argv[]) {
-  if (argc<2) {
-    cout << "usage: " << argv[0] << " files ...\n";
+  if (argc!=2) {
+    cout << "usage: " << argv[0] << " json_config_string\n";
     return 1;
   }
 
@@ -118,32 +97,34 @@ int main(int argc, char* argv[]) {
   using tpoint = std::chrono::time_point<clock>;
   const tpoint start = clock::now();
 
-  // for (auto x : getnums(argv[1])) TEST(x)
+  ivanp::json card(argv[1]);
 
-  // auto edges = getnums(argv[2]);
-  // if (edges.size()<2) THROW("need at least two edges");
-  // std::sort(edges.begin(),edges.end());
-  // for (auto x : edges) TEST(x)
-  // auto S = getnums(argv[2]);
-  // if (S.size()!=6) THROW("DSCB needs 6 parameters");
-  // for (auto x : S) TEST(x)
-
-  unsigned nS = 110;
+  const unsigned nS = (unsigned)card["S"]["ndiv"] * (160-105);
   double* histS = new double[nS];
-
-  unsigned nB = 110;
-  double* histB = new double[nB];
-
   double mS[3] { };
 
-  for (int argi=1; argi<argc; ++argi) {
-    file events(argv[argi]);
-    if (is_mc) {
+  const unsigned nB = (unsigned)card["B"]["ndiv"] * (160-105);
+  double* histB = new double[nB];
+  const unsigned nb[3] {
+    nB*(121-105)/(160-105),
+    nB*(129-121)/(160-105),
+    nB*(160-129)/(160-105)
+  };
+
+  const auto prefix = (const std::string&)card["var"]+'-';
+  for (const auto& file : std::filesystem::directory_iterator(
+    (const std::string&)card["set"]
+  )) {
+    if (!( file.is_regular_file()
+        && file.path().filename().native().starts_with(prefix)
+    )) continue;
+    reader events(file.path().c_str());
+    if (events.is_mc) {
       for (auto [event,end] = *events; event!=end; event+=4) {
-        myy    = event[0] - 125.;
-        var    = event[1];
-        truth  = event[2];
-        weight = event[3];
+        double myy    = event[0] - 125.;
+        double var    = event[1];
+        double truth  = event[2];
+        double weight = event[3];
 
         unsigned i = find_bin(myy,-20,35,nS);
         if (i!=overflow) histS[i] += weight;
@@ -157,8 +138,8 @@ int main(int argc, char* argv[]) {
       }
     } else {
       for (auto [event,end] = *events; event!=end; event+=2) {
-        myy    = event[0] - 125.;
-        var    = event[1];
+        double myy    = event[0] - 125.;
+        double var    = event[1];
 
         unsigned i = find_bin(myy,-20,35,nB);
         if (i!=overflow) ++histB[i];
@@ -168,17 +149,10 @@ int main(int argc, char* argv[]) {
 
   mS[1] /= mS[0];
   mS[2] = mS[2]/mS[0] - mS[1]*mS[1];
-  TEST(mS[1])
-  TEST(mS[2])
 
-  double cs[4];
-  const unsigned nc = std::size(cs);
-  { const unsigned nb[3] {
-      nB*(121-105)/(160-105),
-      nB*(129-121)/(160-105),
-      nB*(160-129)/(160-105)
-    };
-    const unsigned nB2 = nb[0]+nb[2];
+  const unsigned nc = (unsigned)card["B"]["deg"]+1;
+  double* csB = new double[nc];
+  { const unsigned nB2 = nb[0]+nb[2];
     double* ys = new double[nB2];
     double* us = new double[nB2];
     double* A = new double[nB2*nc];
@@ -197,26 +171,41 @@ int main(int argc, char* argv[]) {
         f *= x;
       }
     }
-    ivanp::wls(A, ys, us, nB2, nc, cs);
+    ivanp::wls(A, ys, us, nB2, nc, csB);
     delete[] us;
+    delete[] ys;
+    delete[] A;
   }
 
-  cout << "hist = [";
-  for (unsigned i=0; i<nB; ++i) {
-    if (i) cout << ',';
-    cout << histB[i];
+  std::stringstream out;
+  out.precision(8);
+  out << "{\"S\":{\"hist\":["
+      << histS[0];
+  for (unsigned i=1; i<nS; ++i)
+    out << ',' << histS[i];
+  out << "],\"mean\":" << mS[1]
+      << ",\"stdev\":" << mS[2]
+      << "},\"B\":{\"hist\":["
+      << histB[0];
+  { unsigned i = 1;
+    for (; i<nb[0]; ++i)
+      out << ',' << histB[i];
+    i += nb[1];
+    for (; i<nB; ++i)
+      out << ',' << histB[i];
   }
-  cout << ']' << endl;
-  cout << "cs = [";
-  for (unsigned i=0; i<nc; ++i) {
-    if (i) cout << ',';
-    cout << cs[i];
-  }
-  cout << ']' << endl;
-
-  delete[] histB;
-  delete[] histS;
+  out << "],\"cs\":["
+      << csB[0];
+  for (unsigned i=1; i<nc; ++i)
+    out << ',' << csB[i];
+  out << "]},\"time\":";
 
   const auto time = std::chrono::duration<double>(clock::now()-start).count();
-  TEST(time)
+  out << time << '}';
+
+  puts(std::move(out).str().c_str());
+
+  delete[] csB;
+  delete[] histB;
+  delete[] histS;
 }
