@@ -227,8 +227,12 @@ int main(int argc, char* argv[]) {
 
   std::stringstream out;
   out.precision(8);
-  out << "{\"bins\":[";
   { double* x; unsigned i;
+    out << "{\"edges\":["
+        << edges[0];
+    for (i=1; i<=nbins; ++i)
+      out << ',' << edges[i];
+    out << "],\"bins\":[";
     for (unsigned b=0; b<nbins; ++b) {
       if (b) out << ',';
       out << "\"S\":{\"hist\":[";
