@@ -9,6 +9,7 @@
 #include <chrono>
 #include <charconv>
 #include <filesystem>
+#include <type_traits>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -81,10 +82,32 @@ unsigned find_bin(double x, double a, double b, unsigned n) noexcept {
   return n*(x-a)/(b-a);
 }
 unsigned find_bin(double x, double* e, unsigned n) noexcept {
-  return std::upper_bound(e,e+n,x) - e;
+  ++n;
+  auto i = std::upper_bound(e,e+n,x) - e;
+  return (i==0 || i==n) ? overflow : i-1;
 }
 double center(unsigned i, double a, double b, unsigned n) noexcept {
   return a + (i*2+1)*(b-a)/(n*2);
+}
+
+template <typename T, size_t N>
+struct pool_array {
+  T* const m[N];
+  ~pool_array() { delete[] m[0]; }
+  template <size_t I>
+  friend T* get(const pool_array& x) { return x.m[I]; }
+};
+namespace std {
+  template <typename T, size_t N>
+  struct tuple_size<pool_array<T,N>>: std::integral_constant<size_t,N> { };
+
+  template <size_t I, typename T, size_t N>
+  struct tuple_element<I,pool_array<T,N>> { using type = T*; };
+}
+template <typename T>
+auto pool(auto... n) -> pool_array<T,sizeof...(n)> {
+  T* m = new T[(n + ...)];
+  return {{ ( m+=n, m-n ) ... }};
 }
 
 int main(int argc, char* argv[]) {
@@ -93,25 +116,42 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  // initialize timer to measure execution time
   using clock = std::chrono::system_clock;
   using tpoint = std::chrono::time_point<clock>;
   const tpoint start = clock::now();
 
+  // read configuration string
   ivanp::json card(argv[1]);
 
-  const unsigned nS = (unsigned)card["S"]["ndiv"] * (160-105);
-  double* histS = new double[nS];
-  double mS[3] { };
+  // get numbers of values
+  const unsigned
+    nm = 3,
+    nbins = card["edges"].size()-1,
+    nS = (unsigned)card["S"]["ndiv"] * (160-105),
+    nB = (unsigned)card["B"]["ndiv"] * (160-105),
+    nV = card["V"]["nbins"],
+    nc = (unsigned)card["B"]["deg"]+1;
 
-  const unsigned nB = (unsigned)card["B"]["ndiv"] * (160-105);
-  double* histB = new double[nB];
   const unsigned nb[3] {
     nB*(121-105)/(160-105),
     nB*(129-121)/(160-105),
     nB*(160-129)/(160-105)
   };
 
-  const auto prefix = (const std::string&)card["var"]+'-';
+  // allocate arrays
+  const auto [
+    edges  , histS   , histB   , histVfine, histV, mS      , cB
+  ] = pool<double>(
+    nbins+1, nS*nbins, nB*nbins, nV       , nbins, nm*nbins, nc*nbins
+  );
+
+  { const auto& xs = card["edges"].get<ivanp::json::array_t>();
+    for (unsigned i=0; i<=nbins; ++i)
+      edges[i] = xs[i];
+  }
+
+  const auto prefix = (const std::string&)card["V"]["name"]+'-';
   for (const auto& file : std::filesystem::directory_iterator(
     (const std::string&)card["set"]
   )) {
@@ -119,93 +159,117 @@ int main(int argc, char* argv[]) {
         && file.path().filename().native().starts_with(prefix)
     )) continue;
     reader events(file.path().c_str());
+
+    const double aV = edges[0], bV = edges[nbins];
     if (events.is_mc) {
       for (auto [event,end] = *events; event!=end; event+=4) {
-        double myy    = event[0] - 125.;
+        double myy    = event[0];
         double var    = event[1];
         double truth  = event[2];
         double weight = event[3];
 
-        unsigned i = find_bin(myy,-20,35,nS);
-        if (i!=overflow) histS[i] += weight;
+        unsigned b = find_bin(var,edges,nbins);
+        if (b==overflow) continue;
+        histV[b] += weight;
 
-        double dm = weight;
-        for (int i=0;;) {
-          mS[i] += dm;
-          if (++i > 2) break;
-          dm *= myy;
+        histVfine[find_bin(var,aV,bV,nV)] += weight;
+
+        unsigned iS = find_bin(myy,105,160,nS);
+        if (iS!=overflow) histS[b*nS+iS] += weight;
+
+        for (unsigned i=0; ; ++i) {
+          mS[b*3+i] += weight;
+          if (i == 2) break;
+          weight *= myy;
         }
       }
     } else {
       for (auto [event,end] = *events; event!=end; event+=2) {
-        double myy    = event[0] - 125.;
-        double var    = event[1];
+        double myy = event[0];
+        double var = event[1];
 
-        unsigned i = find_bin(myy,-20,35,nB);
-        if (i!=overflow) ++histB[i];
+        unsigned b = find_bin(var,edges,nbins);
+        if (b==overflow) continue;
+
+        unsigned iB = find_bin(myy,105,160,nB);
+        if (iB!=overflow) ++histB[b*nB+iB];
       }
     }
   }
 
-  mS[1] /= mS[0];
-  mS[2] = mS[2]/mS[0] - mS[1]*mS[1];
+  for (double* m = mS+nm*nbins; (m-=3)!=mS; ) {
+    m[1] /= m[0];
+    m[2] = m[2]/m[0] - m[1]*m[1];
+  }
 
-  const unsigned nc = (unsigned)card["B"]["deg"]+1;
-  double* csB = new double[nc];
   { const unsigned nB2 = nb[0]+nb[2];
-    double* ys = new double[nB2];
-    double* us = new double[nB2];
-    double* A = new double[nB2*nc];
-    for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
-      if (j == nb[0]) j += nb[1];
-      double y = histB[j],
-            *a = A + i,
-             x = center(j,-20,35,nB),
-             f = 1;
-      ys[i] = y;
-      us[i] = y ?: 1.;
-      for (unsigned j=0;;) {
-        *a = f;
-        if (++j >= nc) break;
-        a += nB2;
-        f *= x;
+    const auto [ ys, us, A ] = pool<double>( nB2, nB2, nB2*nc );
+    // TODO: assign ones once
+    for (unsigned b=0; b<nbins; ++b) {
+      for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
+        if (j == nb[0]) j += nb[1];
+        double y = histB[b*nB+j],
+              *a = A + i,
+               x = center(j,-20,35,nB),
+               f = 1;
+        ys[i] = y;
+        us[i] = y ?: 1.;
+        for (unsigned j=0;;) {
+          *a = f;
+          if (++j >= nc) break;
+          a += nB2;
+          f *= x;
+        }
       }
+      ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
     }
-    ivanp::wls(A, ys, us, nB2, nc, csB);
-    delete[] us;
-    delete[] ys;
-    delete[] A;
   }
 
   std::stringstream out;
   out.precision(8);
-  out << "{\"S\":{\"hist\":["
-      << histS[0];
-  for (unsigned i=1; i<nS; ++i)
-    out << ',' << histS[i];
-  out << "],\"mean\":" << mS[1]
-      << ",\"stdev\":" << mS[2]
-      << "},\"B\":{\"hist\":["
-      << histB[0];
-  { unsigned i = 1;
-    for (; i<nb[0]; ++i)
-      out << ',' << histB[i];
-    i += nb[1];
-    for (; i<nB; ++i)
-      out << ',' << histB[i];
+  out << "{\"bins\":[";
+  { double* x; unsigned i;
+    for (unsigned b=0; b<nbins; ++b) {
+      if (b) out << ',';
+      out << "\"S\":{\"hist\":[";
+
+      x = histS + b*nS;
+      out << x[0];
+      for (i=1; i<nS; ++i)
+        out << ',' << x[i];
+
+      x = mS + b*nm;
+      out << "],\"mean\":" << x[1]
+          << ",\"stdev\":" << x[2]
+          << "},\"B\":{\"hist\":[";
+
+      x = histB + b*nB;
+      out << x[0];
+      for (i=1; i<nb[0]; ++i)
+        out << ',' << x[i];
+      for (i+=nb[1]; i<nB; ++i)
+        out << ',' << x[i];
+      out << "],\"cs\":[";
+
+      x = cB + b*nc;
+      out << x[0];
+      for (i=1; i<nc; ++i)
+        out << ',' << x[i];
+      out << "]}";
+    }
+    out << "],\"V\":[["
+        << histVfine[0];
+    for (i=1; i<nV; ++i)
+      out << ',' << histVfine[i];
+    out << "],["
+        << histV[0];
+    for (i=1; i<nbins; ++i)
+      out << ',' << histV[i];
+    out << "]],\"time\":";
   }
-  out << "],\"cs\":["
-      << csB[0];
-  for (unsigned i=1; i<nc; ++i)
-    out << ',' << csB[i];
-  out << "]},\"time\":";
 
   const auto time = std::chrono::duration<double>(clock::now()-start).count();
   out << time << '}';
 
   puts(std::move(out).str().c_str());
-
-  delete[] csB;
-  delete[] histB;
-  delete[] histS;
 }

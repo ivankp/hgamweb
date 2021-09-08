@@ -102,6 +102,15 @@ struct json {
     throw error("non-existent key");
   }
 
+  size_t size() const {
+    return std::visit([]<typename T>(const T& x) -> size_t {
+      if constexpr (is_string_v<T> || is_array_v<T> || is_object_v<T>)
+        return x.size();
+      else
+        throw error("not a composite value type");
+    },node);
+  }
+
   const char* type_name() const;
 
   constexpr bool is_null  () const noexcept { return node.index()==0; }
