@@ -116,15 +116,15 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // initialize timer to measure execution time
+  // initialize timer to measure execution time ---------------------
   using clock = std::chrono::system_clock;
   using tpoint = std::chrono::time_point<clock>;
   const tpoint start = clock::now();
 
-  // read configuration string
+  // read configuration string --------------------------------------
   ivanp::json card(argv[1]);
 
-  // get numbers of values
+  // get numbers of values ------------------------------------------
   const unsigned
     nm = 3,
     nbins = card["edges"].size()-1,
@@ -139,7 +139,7 @@ int main(int argc, char* argv[]) {
     nB*(160-129)/(160-105)
   };
 
-  // allocate arrays
+  // allocate arrays ------------------------------------------------
   const auto [
     edges  , histS   , histB   , histVfine, histV, mS      , cB
   ] = pool<double>(
@@ -151,6 +151,7 @@ int main(int argc, char* argv[]) {
       edges[i] = xs[i];
   }
 
+  // read event files -----------------------------------------------
   const auto prefix = (const std::string&)card["V"]["name"]+'-';
   for (const auto& file : std::filesystem::directory_iterator(
     (const std::string&)card["set"]
@@ -197,11 +198,13 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  // signal distribution moments ------------------------------------
   for (double* m = mS+nm*nbins; (m-=3)!=mS; ) {
     m[1] /= m[0];
     m[2] = m[2]/m[0] - m[1]*m[1];
   }
 
+  // background fit (weighted least squares) ------------------------
   { const unsigned nB2 = nb[0]+nb[2];
     const auto [ ys, us, A ] = pool<double>( nB2, nB2, nB2*nc );
     // TODO: assign ones once
@@ -214,9 +217,9 @@ int main(int argc, char* argv[]) {
                f = 1;
         ys[i] = y;
         us[i] = y ?: 1.;
-        for (unsigned j=0;;) {
+        for (unsigned k=0;;) {
           *a = f;
-          if (++j >= nc) break;
+          if (++k >= nc) break;
           a += nB2;
           f *= x;
         }
@@ -225,6 +228,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  // JSON output ----------------------------------------------------
   std::stringstream out;
   out.precision(8);
   { double* x; unsigned i;
