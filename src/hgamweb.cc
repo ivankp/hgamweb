@@ -199,7 +199,8 @@ int main(int argc, char* argv[]) {
   }
 
   // signal distribution moments ------------------------------------
-  for (double* m = mS+nm*nbins; (m-=3)!=mS; ) {
+  for (double* m = mS+nm*nbins; m!=mS; ) {
+    m -= nm;
     m[1] /= m[0];
     m[2] = m[2]/m[0] - m[1]*m[1];
   }
@@ -207,22 +208,18 @@ int main(int argc, char* argv[]) {
   // background fit (weighted least squares) ------------------------
   { const unsigned nB2 = nb[0]+nb[2];
     const auto [ ys, us, A ] = pool<double>( nB2, nB2, nB2*nc );
-    // TODO: assign ones once
+    std::fill(A, A+nB2, 1.);
     for (unsigned b=0; b<nbins; ++b) {
       for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
         if (j == nb[0]) j += nb[1];
         double y = histB[b*nB+j],
               *a = A + i,
                x = center(j,-20,35,nB),
-               f = 1;
+               f = 1.;
         ys[i] = y;
         us[i] = y ?: 1.;
-        for (unsigned k=0;;) {
-          *a = f;
-          if (++k >= nc) break;
-          a += nB2;
-          f *= x;
-        }
+        for (unsigned k=1; k<nc; ++k)
+          *(a+=nB2) = (f*=x);
       }
       ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
     }
