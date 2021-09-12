@@ -28,7 +28,7 @@ using std::endl;
 using ivanp::cat;
 // using ivanp::sq;
 
-double lumi_data = 0, lumi_mc = 0;
+double lumi_data = 0, lumi_mc = 0, lumi = 0;
 
 static_assert(sizeof(float )==4);
 static_assert(sizeof(double)==8);
@@ -110,6 +110,17 @@ auto pool(auto... n) -> pool_array<T,sizeof...(n)> {
   return {{ ( m+=n, m-n ) ... }};
 }
 
+template <typename S, typename F>
+struct stream_decorator {
+  S s;
+  F f;
+  template <typename T>
+  friend stream_decorator& operator<<(stream_decorator& d, T&& x) {
+    d.f(d.s,std::forward<T>(x));
+    return d;
+  }
+};
+
 int main(int argc, char* argv[]) {
   if (argc!=2) {
     cout << "usage: " << argv[0] << " json_config_string\n";
@@ -122,16 +133,19 @@ int main(int argc, char* argv[]) {
   const tpoint start = clock::now();
 
   // read configuration string --------------------------------------
+  cout << argv[1] << endl;
   ivanp::json card(argv[1]);
+
+  lumi = card["L"];
 
   // get numbers of values ------------------------------------------
   const unsigned
     nm = 3,
     nbins = card["edges"].size()-1,
-    nS = (unsigned)card["S"]["ndiv"] * (160-105),
-    nB = (unsigned)card["B"]["ndiv"] * (160-105),
-    nV = card["V"]["nbins"],
-    nc = (unsigned)card["B"]["deg"]+1;
+    nS = (unsigned)card["Sdiv"] * (160-105),
+    nB = (unsigned)card["Bdiv"] * (160-105),
+    nV = card["nV"],
+    nc = (unsigned)card["Bdeg"]+1;
 
   const unsigned nb[3] {
     nB*(121-105)/(160-105),
@@ -147,14 +161,21 @@ int main(int argc, char* argv[]) {
   );
 
   { const auto& xs = card["edges"].get<ivanp::json::array_t>();
-    for (unsigned i=0; i<=nbins; ++i)
-      edges[i] = xs[i];
+    for (unsigned i=0; i<=nbins; ++i) {
+      const auto& x = xs[i];
+      double v;
+      if (x.is_string())
+        v = std::stod(x.get<ivanp::json::string_t>());
+      else
+        v = x;
+      edges[i] = v;
+    }
   }
 
   // read event files -----------------------------------------------
-  const auto prefix = (const std::string&)card["V"]["name"]+'-';
+  const auto prefix = (const std::string&)card["V"]+'-';
   for (const auto& file : std::filesystem::directory_iterator(
-    (const std::string&)card["set"]
+    (const std::string&)card["H"]
   )) {
     if (!( file.is_regular_file()
         && file.path().filename().native().starts_with(prefix)
@@ -226,8 +247,22 @@ int main(int argc, char* argv[]) {
   }
 
   // JSON output ----------------------------------------------------
-  std::stringstream out;
-  out.precision(8);
+  // std::stringstream out;
+  stream_decorator out {
+    std::stringstream{},
+    [](auto& s, auto&& x) {
+      if constexpr (std::is_floating_point_v<std::remove_cvref_t<decltype(x)>>) {
+        const bool ok = std::isfinite(x);
+        if (!ok) s << '\"';
+        s << x;
+        if (!ok) s << '\"';
+      } else {
+        s << x;
+      }
+    }
+  };
+  out.s.precision(8);
+
   { double* x; unsigned i;
     out << "{\"edges\":["
         << edges[0];
@@ -236,7 +271,7 @@ int main(int argc, char* argv[]) {
     out << "],\"bins\":[";
     for (unsigned b=0; b<nbins; ++b) {
       if (b) out << ',';
-      out << "\"S\":{\"hist\":[";
+      out << "{\"S\":{\"hist\":[";
 
       x = histS + b*nS;
       out << x[0];
@@ -260,7 +295,7 @@ int main(int argc, char* argv[]) {
       out << x[0];
       for (i=1; i<nc; ++i)
         out << ',' << x[i];
-      out << "]}";
+      out << "]}}";
     }
     out << "],\"V\":[["
         << histVfine[0];
@@ -276,5 +311,5 @@ int main(int argc, char* argv[]) {
   const auto time = std::chrono::duration<double>(clock::now()-start).count();
   out << time << '}';
 
-  puts(std::move(out).str().c_str());
+  puts(std::move(out.s).str().c_str());
 }
