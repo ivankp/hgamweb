@@ -6,9 +6,9 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+// #include <numeric>
 #include <chrono>
 #include <charconv>
-#include <filesystem>
 #include <type_traits>
 
 #include <unistd.h>
@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-// #include "linalg.hh"
+#include "linalg.hh"
 #include "wls.hh"
 #include "json.hh"
 #include "error.hh"
@@ -26,7 +26,7 @@ using std::cerr;
 using std::endl;
 // using std::get;
 using ivanp::cat;
-// using ivanp::sq;
+using ivanp::sq;
 
 double lumi_data = 0, lumi_mc = 0, lumi = 0;
 
@@ -93,7 +93,7 @@ double center(unsigned i, double a, double b, unsigned n) noexcept {
 template <typename T, size_t N>
 struct pool_array {
   T* const m[N];
-  ~pool_array() { delete[] m[0]; }
+  ~pool_array() { free(m[0]); }
   template <size_t I>
   friend T* get(const pool_array& x) { return x.m[I]; }
 };
@@ -106,7 +106,8 @@ namespace std {
 }
 template <typename T>
 auto pool(auto... n) -> pool_array<T,sizeof...(n)> {
-  T* m = new T[(n + ...)];
+  // T* m = new T[(n + ...)];
+  T* m = reinterpret_cast<T*>(calloc((n + ...),sizeof(T)));
   return {{ ( m+=n, m-n ) ... }};
 }
 
@@ -121,6 +122,28 @@ struct stream_decorator {
   }
 };
 
+template <typename F>
+double simpson(double a, double b, unsigned n, F&& f) {
+  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = 0;
+  for (unsigned i=0; i<n; ++i)
+    sum1 += f(a + h*i + h2);
+  for (unsigned i=1; i<n; ++i)
+    sum2 += f(a + h*i);
+  return h/6 * (f(a) + f(b) + 4*sum1 + 2*sum2);
+}
+
+// constexpr double root2pi = M_SQRT2*2/M_2_SQRTPI;
+// double gaus(double x, double μ, double σ) {
+//   return std::exp(-0.5*sq((x-μ)/σ))/(σ*root2pi);
+// }
+
+double poly(double x, const double* c, unsigned n) {
+  const double *end = c+n;
+  double f = *c, y = 1;
+  while (++c < end) f += *c*(y*=x);
+  return f;
+}
+
 int main(int argc, char* argv[]) {
   if (argc!=2) {
     cout << "usage: " << argv[0] << " json_config_string\n";
@@ -128,7 +151,7 @@ int main(int argc, char* argv[]) {
   }
 
   // initialize timer to measure execution time ---------------------
-  using clock = std::chrono::system_clock;
+  using clock  = std::chrono::system_clock;
   using tpoint = std::chrono::time_point<clock>;
   const tpoint start = clock::now();
 
@@ -155,9 +178,9 @@ int main(int argc, char* argv[]) {
 
   // allocate arrays ------------------------------------------------
   const auto [
-    edges  , histS   , histB   , histVfine, histV, mS      , cB
+    edges  , histS   , histB   , histVfine, histV, mS      , cB      , rewbkg
   ] = pool<double>(
-    nbins+1, nS*nbins, nB*nbins, nV       , nbins, nm*nbins, nc*nbins
+    nbins+1, nS*nbins, nB*nbins, nV       , nbins, nm*nbins, nc*nbins, nbins
   );
 
   { const auto& xs = card["edges"].get<ivanp::json::array_t>();
@@ -172,50 +195,43 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // read event files -----------------------------------------------
-  const auto prefix = (const std::string&)card["V"]+'-';
-  for (const auto& file : std::filesystem::directory_iterator(
-    (const std::string&)card["H"]
-  )) {
-    if (!( file.is_regular_file()
-        && file.path().filename().native().starts_with(prefix)
-    )) continue;
-    reader events(file.path().c_str());
-
+  // read MC event files --------------------------------------------
+  { reader events(cat(card["H"],'/',card["V"],"-mc").c_str());
     const double aV = edges[0], bV = edges[nbins];
-    if (events.is_mc) {
-      for (auto [event,end] = *events; event!=end; event+=4) {
-        double myy    = event[0];
-        double var    = event[1];
-        double truth  = event[2];
-        double weight = event[3];
+    for (auto [event,end] = *events; event!=end; event+=4) {
+      double myy    = event[0] - 125;
+      double var    = event[1];
+      double truth  = event[2];
+      double weight = event[3];
 
-        unsigned b = find_bin(var,edges,nbins);
-        if (b==overflow) continue;
-        histV[b] += weight;
+      unsigned b = find_bin(var,edges,nbins);
+      if (b==overflow) continue;
+      histV[b] += weight;
 
-        histVfine[find_bin(var,aV,bV,nV)] += weight;
+      histVfine[find_bin(var,aV,bV,nV)] += weight;
 
-        unsigned iS = find_bin(myy,105,160,nS);
-        if (iS!=overflow) histS[b*nS+iS] += weight;
+      unsigned iS = find_bin(myy,-20,35,nS);
+      if (iS!=overflow) histS[b*nS+iS] += weight;
 
-        for (unsigned i=0; ; ++i) {
-          mS[b*3+i] += weight;
-          if (i == 2) break;
-          weight *= myy;
-        }
+      for (unsigned i=0; ; ++i) {
+        mS[b*3+i] += weight;
+        if (i == 2) break;
+        weight *= myy;
       }
-    } else {
-      for (auto [event,end] = *events; event!=end; event+=2) {
-        double myy = event[0];
-        double var = event[1];
+    }
+  }
 
-        unsigned b = find_bin(var,edges,nbins);
-        if (b==overflow) continue;
+  // read data event files ------------------------------------------
+  { reader events(cat(card["H"],'/',card["V"],"-data").c_str());
+    for (auto [event,end] = *events; event!=end; event+=2) {
+      double myy = event[0] - 125;
+      double var = event[1];
 
-        unsigned iB = find_bin(myy,105,160,nB);
-        if (iB!=overflow) ++histB[b*nB+iB];
-      }
+      unsigned b = find_bin(var,edges,nbins);
+      if (b==overflow) continue;
+
+      unsigned iB = find_bin(myy,-20,35,nB);
+      if (iB!=overflow) ++histB[b*nB+iB];
     }
   }
 
@@ -223,7 +239,7 @@ int main(int argc, char* argv[]) {
   for (double* m = mS+nm*nbins; m!=mS; ) {
     m -= nm;
     m[1] /= m[0];
-    m[2] = m[2]/m[0] - m[1]*m[1];
+    m[2] = std::sqrt(m[2]/m[0] - m[1]*m[1]);
   }
 
   // background fit (weighted least squares) ------------------------
@@ -246,11 +262,20 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  // reweight background --------------------------------------------
+  for (unsigned b=0; b<nbins; ++b) {
+    const double
+      *m = mS + b*nm, *c = cB + b*nc;
+      // *hS = histS + b*nS, S = std::accumulate(hS,hS+nS,0.);
+    rewbkg[b] = simpson(-20,35,200,[=](double x){
+      return std::exp(-0.5*sq((x-m[1])/m[2])) * poly(x,c,nc);
+    });
+  }
+
   // JSON output ----------------------------------------------------
-  // std::stringstream out;
   stream_decorator out {
     std::stringstream{},
-    [](auto& s, auto&& x) {
+    [](auto& s, const auto& x) {
       if constexpr (std::is_floating_point_v<std::remove_cvref_t<decltype(x)>>) {
         const bool ok = std::isfinite(x);
         if (!ok) s << '\"';
@@ -295,7 +320,7 @@ int main(int argc, char* argv[]) {
       out << x[0];
       for (i=1; i<nc; ++i)
         out << ',' << x[i];
-      out << "]}}";
+      out << "],\"rew\":" << rewbkg[b] << "}}";
     }
     out << "],\"V\":[["
         << histVfine[0];

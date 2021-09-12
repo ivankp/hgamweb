@@ -15,9 +15,10 @@ inline const char* cstr(const std::string& x) noexcept { return x.c_str(); }
 
 namespace impl {
 
+template <typename T>
 [[nodiscard]]
 [[gnu::always_inline]]
-inline std::string_view to_string_view(std::string_view x) noexcept {
+inline std::string_view to_string_view(const T& x) noexcept {
   return x;
 }
 [[nodiscard]]

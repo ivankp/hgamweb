@@ -180,9 +180,11 @@ struct json {
   // cast operators -------------------------------------------------
   template <typename T>
   operator T() const { return get<T>(); }
+
+  operator std::string_view() const { return get<string_t>(); }
   // ----------------------------------------------------------------
 };
 
 std::ostream& operator<<(std::ostream& o, const json& j);
 
-}
+} // end namespace ivanp
