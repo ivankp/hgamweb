@@ -251,9 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         $(tr,'td').textContent = Lbkg;
         $(tr,'td').textContent = Rbkg;
-        const bkg =
-          method==='bkg_rew' ? bin.B.rew :
-          method==='sig_reg' ? ''  : '';
+        const bkg = bin.B.bkg[ method==='bkg_rew' ? 1 : 0 ];
         $(tr,'td').textContent = bkg.toFixed(2);
         $(tr,'td');
         $(tr,'td').textContent = (100*Math.sqrt(bkg)/bkg).toFixed(2)+'%';

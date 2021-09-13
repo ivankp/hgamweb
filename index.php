@@ -97,8 +97,8 @@ const vars = <?php
   </div><div>
     <label>Background model:
       <select name="Bf">
-        <option value="poly">Poly</option>
         <option value="exppoly">ExpPoly</option>
+        <option value="poly">Poly</option>
       </select>
     </label>
     <input type="number" name="Bdeg" min="0" max="6" value="2">
@@ -115,10 +115,10 @@ const vars = <?php
       <input type="number" name="nV" min="1" max="200" value="100">
     </label>
   </div><div>
-    <label>Significance method:
+    <label>Background estimate:
       <select name="method">
-        <option value="bkg_rew">Bkg reweighting</option>
-        <option value="sig_reg">Sig region</option>
+        <option value="bkg_rew">Reweighting</option>
+        <option value="sig_reg">Signal region</option>
       </select>
     </label>
   </div><div>
