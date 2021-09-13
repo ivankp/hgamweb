@@ -6,7 +6,6 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
-// #include <numeric>
 #include <chrono>
 #include <charconv>
 #include <type_traits>
@@ -24,17 +23,14 @@
 using std::cout;
 using std::cerr;
 using std::endl;
-// using std::get;
 using ivanp::cat;
 using ivanp::sq;
-
-double lumi_data = 0, lumi_mc = 0, lumi = 0;
 
 static_assert(sizeof(float )==4);
 static_assert(sizeof(double)==8);
 
 struct reader {
-  char* m; size_t n; bool is_mc;
+  char* m; size_t n; float lumi; bool is_mc;
   reader(const char* filename) {
     const int fd = ::open(filename,O_RDONLY);
     if (fd < 0) THROW_ERRNO("open",filename);
@@ -49,14 +45,11 @@ struct reader {
     if (nread < 0) THROW_ERRNO("read",filename);
     if (size_t(nread) < len) THROW(filename,": couldn't read whole file");
 
-    float lumi_f;
-    memcpy(&lumi_f,m+8,sizeof(lumi_f));
+    memcpy(&lumi,m+8,sizeof(lumi));
     if (*m == 'd') { // data
       is_mc = false;
-      lumi_data += lumi_f;
     } else if (*m == 'm') { // MC
       is_mc = true;
-      lumi_mc += lumi_f;
     } else THROW(filename,": unexpected first byte");
 
     uint32_t nevents;
@@ -159,8 +152,6 @@ int main(int argc, char* argv[]) {
   cout << argv[1] << endl;
   ivanp::json card(argv[1]);
 
-  lumi = card["L"];
-
   // get numbers of values ------------------------------------------
   const unsigned
     nm = 3,
@@ -178,12 +169,14 @@ int main(int argc, char* argv[]) {
 
   // allocate arrays ------------------------------------------------
   const auto [
-    edges  , histS   , histB   , histVfine, histV, mS      , cB      , rewbkg
+    edges  , histS   , mS      , w2S  , histB   , histVfine, histV, cB      ,
+    bkg    , rewbkg
   ] = pool<double>(
-    nbins+1, nS*nbins, nB*nbins, nV       , nbins, nm*nbins, nc*nbins, nbins
+    nbins+1, nS*nbins, nm*nbins, nbins, nB*nbins, nV       , nbins, nc*nbins,
+    nbins  , nbins
   );
 
-  { const auto& xs = card["edges"].get<ivanp::json::array_t>();
+  { const ivanp::json::array_t& xs = card["edges"];
     for (unsigned i=0; i<=nbins; ++i) {
       const auto& x = xs[i];
       double v;
@@ -210,6 +203,8 @@ int main(int argc, char* argv[]) {
 
       histVfine[find_bin(var,aV,bV,nV)] += weight;
 
+      w2S[b] += weight*weight;
+
       unsigned iS = find_bin(myy,-20,35,nS);
       if (iS!=overflow) histS[b*nS+iS] += weight;
 
@@ -222,7 +217,9 @@ int main(int argc, char* argv[]) {
   }
 
   // read data event files ------------------------------------------
+  float lumi;
   { reader events(cat(card["H"],'/',card["V"],"-data").c_str());
+    lumi = events.lumi;
     for (auto [event,end] = *events; event!=end; event+=2) {
       double myy = event[0] - 125;
       double var = event[1];
@@ -243,33 +240,65 @@ int main(int argc, char* argv[]) {
   }
 
   // background fit (weighted least squares) ------------------------
+  const bool fitexp = card["Bf"].get<std::string>() == "exppoly";
   { const unsigned nB2 = nb[0]+nb[2];
     const auto [ ys, us, A ] = pool<double>( nB2, nB2, nB2*nc );
     std::fill(A, A+nB2, 1.);
-    for (unsigned b=0; b<nbins; ++b) {
-      for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
-        if (j == nb[0]) j += nb[1];
-        double y = histB[b*nB+j],
-              *a = A + i,
-               x = center(j,-20,35,nB),
-               f = 1.;
-        ys[i] = y;
-        us[i] = y ?: 1.;
-        for (unsigned k=1; k<nc; ++k)
-          *(a+=nB2) = (f*=x);
-      }
-      ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
-    }
-  }
+    const std::string& Bf = card["Bf"];
+    if (!fitexp) { // fit polynomial
+      for (unsigned b=0; b<nbins; ++b) {
+        for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
+          if (j == nb[0]) j += nb[1];
+          double y = histB[b*nB+j],
+                *a = A + i,
+                 x = center(j,-20,35,nB),
+                 f = 1.;
+          ys[i] = y;
+          us[i] = y>0 ? y : 1.;
+          for (unsigned k=1; k<nc; ++k)
+            *(a+=nB2) = (f*=x);
+        }
+        ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
 
-  // reweight background --------------------------------------------
-  for (unsigned b=0; b<nbins; ++b) {
-    const double
-      *m = mS + b*nm, *c = cB + b*nc;
-      // *hS = histS + b*nS, S = std::accumulate(hS,hS+nS,0.);
-    rewbkg[b] = simpson(-20,35,200,[=](double x){
-      return std::exp(-0.5*sq((x-m[1])/m[2])) * poly(x,c,nc);
-    });
+        // integration
+        const double *m = mS + b*nm, *c = cB + b*nc;
+        bkg[b] = simpson(-4,4,50,[=](double x){
+          return poly(x,c,nc);
+        });
+        rewbkg[b] = simpson(-20,35,50,[=](double x){
+          return std::exp(-0.5*sq((x-m[1])/m[2])) * poly(x,c,nc);
+        });
+      }
+    } else { // fit exp(polynomial)
+      for (unsigned b=0; b<nbins; ++b) {
+        for (unsigned i=0, j=0; i<nB2; ++i, ++j) {
+          if (j == nb[0]) j += nb[1];
+          double y = histB[b*nB+j],
+                *a = A + i,
+                 x = center(j,-20,35,nB),
+                 f = 1.;
+          if (y>0) {
+            ys[i] = std::log(y);
+            us[i] = 1./y;
+          } else {
+            ys[i] = 0.;
+            us[i] = 1.;
+          }
+          for (unsigned k=1; k<nc; ++k)
+            *(a+=nB2) = (f*=x);
+        }
+        ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
+
+        // integration
+        const double *m = mS + b*nm, *c = cB + b*nc;
+        bkg[b] = simpson(-4,4,50,[=](double x){
+          return std::exp(poly(x,c,nc));
+        });
+        rewbkg[b] = simpson(-20,35,50,[=](double x){
+          return std::exp(-0.5*sq((x-m[1])/m[2])) * std::exp(poly(x,c,nc));
+        });
+      }
+    }
   }
 
   // JSON output ----------------------------------------------------
@@ -289,7 +318,8 @@ int main(int argc, char* argv[]) {
   out.s.precision(8);
 
   { double* x; unsigned i;
-    out << "{\"edges\":["
+    out << "{\"lumi\":" << lumi
+        << ",\"edges\":["
         << edges[0];
     for (i=1; i<=nbins; ++i)
       out << ',' << edges[i];
@@ -306,6 +336,7 @@ int main(int argc, char* argv[]) {
       x = mS + b*nm;
       out << "],\"mean\":" << x[1]
           << ",\"stdev\":" << x[2]
+          << ",\"rootw2\":" << std::sqrt(w2S[b])
           << "},\"B\":{\"hist\":[";
 
       x = histB + b*nB;
@@ -320,7 +351,7 @@ int main(int argc, char* argv[]) {
       out << x[0];
       for (i=1; i<nc; ++i)
         out << ',' << x[i];
-      out << "],\"rew\":" << rewbkg[b] << "}}";
+      out << "],\"bkg\":[" << bkg[b] << ',' << rewbkg[b] << "]}}";
     }
     out << "],\"V\":[["
         << histVfine[0];

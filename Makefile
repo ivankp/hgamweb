@@ -21,6 +21,8 @@ bin/hgamweb: $(patsubst %, .build/%.o, linalg wls json)
 LF_hgamweb := -static -static-libstdc++ -static-libgcc
 # L_hgamweb :=
 
+STRIP := hgamweb
+
 #####################################################################
 
 .PRECIOUS: .build/%.o lib/lib%.so
@@ -28,6 +30,7 @@ LF_hgamweb := -static -static-libstdc++ -static-libgcc
 bin/%: .build/%.o
 	@mkdir -pv $(dir $@)
 	$(CXX) $(LDFLAGS) $(LF_$*) $(filter %.o,$^) -o $@ $(LDLIBS) $(L_$*)
+	$(if $(filter $*,$(STRIP)), strip -s $@)
 
 lib/lib%.so:
 	@mkdir -pv $(dir $@)
