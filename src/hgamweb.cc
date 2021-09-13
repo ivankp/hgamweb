@@ -144,9 +144,8 @@ int main(int argc, char* argv[]) {
   }
 
   // initialize timer to measure execution time ---------------------
-  using clock  = std::chrono::system_clock;
-  using tpoint = std::chrono::time_point<clock>;
-  const tpoint start = clock::now();
+  using clock = std::chrono::high_resolution_clock;
+  const auto start = clock::now();
 
   // read configuration string --------------------------------------
   cout << argv[1] << endl;
