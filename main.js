@@ -44,18 +44,20 @@ function* enumerate(xs,i=0) {
   for (const x of xs) yield [i++, x];
 }
 
-var nom_lumi = 140, var_name = 'pT_yy', table;
+var lumi, nom_lumi = 140.429, var_name = 'pT_yy', table;
 
 var em;
 
 function resize_table() {
   const w  = table.parentNode.clientWidth;
   const wt = table.offsetWidth;
-  const x = parseFloat(
+  let x = parseFloat(
     window.getComputedStyle(table,null).getPropertyValue('font-size')
   );
   if (w < wt || x < em) {
-    table.style.fontSize = `${x*w/wt}px`;
+    x *= w/wt;
+    if (x > em) x = em;
+    table.style.fontSize = `${x}px`;
   }
 }
 
@@ -88,6 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
     m = form.querySelector('[name="L"]');
     v = parseFloat(m.value);
     if (!(v > 0)) v = nom_lumi;
+    lumi = v;
     m.value = v = `${v}`;
     q += '?L='+v;
 
@@ -140,11 +143,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isNaN(v)) v = 100;
     q += `&nV=${v}`;
 
+    let u = q;
+
     m = form.querySelector('[name="method"]');
     const method = m.value;
-    q += '&method='+method;
-
-    let u = q;
+    u += '&method='+method;
 
     m = form.querySelector('[name="click"]');
     if (m.checked) u += '&click';
@@ -156,7 +159,6 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log(u);
 
     clear(table);
-    let tr;
     const cls = [
       null,null,'unc','unc',
       null,null,null,'unc','unc',
@@ -171,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
       'L bkg','R bkg','bkg','','\u221abkg',
       's/\u221a(s+b)','Cowan','s/(s+b)','purity'
     ]]) {
-      tr = $(table,'tr');
+      const tr = $(table,'tr');
       for (const [i,col] of enumerate(row)) {
         const td = $(tr,'td',[cls[i]]);
         td.textContent = col;
@@ -184,6 +186,46 @@ document.addEventListener('DOMContentLoaded', () => {
     .then(r => {
       console.log(r);
       _id('time').textContent = `(${r['time'].toFixed(2)} sec)`;
+      const edges = r.edges.map(x => x==='inf' ? '∞' : x==='-inf' ? '-∞' : x);
+
+      for (const [b,bin] of enumerate(r.bins)) {
+        const tr = $(table,'tr');
+        $(tr,'td').textContent = `[${edges[b]},${edges[b+1]})`;
+        { let sum_all=0, sum_sig=0;
+          const hist = bin.S.hist,
+                n3 = hist.length,
+                n1 = n3*(121-105)/(160-105),
+                n2 = n3*(129-105)/(160-105);
+          for (const x of hist)
+            sum_all += x;
+          for (let i=n1; i<n2; ++i)
+            sum_sig += hist[i];
+          sum_all *= lumi;
+          sum_sig *= lumi;
+          $(tr,'td').textContent = sum_all.toFixed(2);
+          $(tr,'td').textContent = sum_sig.toFixed(2);
+          $(tr,'td');
+          $(tr,'td').textContent = (100*Math.sqrt(sum_sig)/sum_sig).toFixed(2)+'%';
+        }
+        { let Lbkg=0, bkg=0, Rbkg=0;
+          const hist = bin.B.hist,
+                n3 = hist.length*(160-105)/(121-105+160-129),
+                n1 = n3*(121-105)/(160-105),
+                n2 = n3 - n3*(129-121)/(160-105);
+          let i=0;
+          for (; i<n1; ++i) Lbkg += hist[i];
+          for (; i<n2; ++i) Rbkg += hist[i];
+          $(tr,'td').textContent = Lbkg.toFixed(0);
+          $(tr,'td').textContent = Rbkg.toFixed(0);
+          $(tr,'td').textContent =  bkg.toFixed(0);
+          $(tr,'td');
+          $(tr,'td').textContent = '%';
+        }
+        $(tr,'td');
+        $(tr,'td');
+        $(tr,'td');
+        $(tr,'td');
+      }
       resize_table();
     });
   }

@@ -48,7 +48,7 @@ input[name="edges"] {
 #t > tr:nth-child(-n+2) > td { text-align: center; }
 #t > tr:nth-child(n+3):hover { background-color: #eee; }
 #t td {
-  padding: 0.1em 0.35em;
+  padding: 0.1em 0.25em;
   white-space: nowrap;
 }
 #t td:nth-child(1) { text-align: left; }
