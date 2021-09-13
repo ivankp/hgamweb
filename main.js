@@ -37,16 +37,13 @@ function clear(x) {
   for (let c; c = x.firstChild; ) x.removeChild(c);
   return x;
 }
-const round = x => x.toFixed(4).replace(/\.?0*$/,'');
 const last = xs => xs[xs.length-1];
 
 function* enumerate(xs,i=0) {
   for (const x of xs) yield [i++, x];
 }
 
-var lumi, nom_lumi = 140.429, var_name = 'pT_yy', table;
-
-var em;
+var lumi, var_name = 'pT_yy', table, em;
 
 function resize_table() {
   const w  = table.parentNode.clientWidth;
@@ -59,6 +56,14 @@ function resize_table() {
     if (x > em) x = em;
     table.style.fontSize = `${x}px`;
   }
+}
+function fix_edges(edges) {
+  return edges.map(
+    x => typeof x === 'string' ? parseFloat(
+      x.replace(/(?:\binf(?:(?:ini)?ty)?\b|∞)/gi,'Infinity')
+       .replace(/−/g,'-')
+    ) : x
+  ).sort((a,b)=>a-b).filter((x,i,xs) => !isNaN(x) && (i==0 || x!==xs[i-1]));
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -87,28 +92,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e) e.preventDefault();
     let q = '', m, v;
 
-    m = form.querySelector('[name="L"]');
-    v = parseFloat(m.value);
-    if (!(v > 0)) v = nom_lumi;
-    lumi = v;
-    m.value = v = `${v}`;
-    q += '?L='+v;
-
-    q += '&H='+H.value;
+    q += '?H='+H.value;
     q += '&V='+var_name;
 
     m = form.querySelector('[name="edges"]');
-    v = m.value.split(/[\s,;:]+/).map(
-      x => parseFloat(
-        x.replace(/(?:\binf(?:(?:ini)?ty)?\b|∞)/gi,'Infinity')
-         .replace(/−/g,'-')
-      )
-    ).sort((a,b)=>a-b).filter((x,i,xs) => !isNaN(x) && (i==0 || x!==xs[i-1]));
+    v = fix_edges(m.value.split(/[\s,;:]+/));
     if (v.length == 0) {
       try {
         v = default_binning[var_name][0][1];
         if (!(v instanceof Array) || v.length == 0)
           throw 'Incorrectly formatted default binning';
+        v = fix_edges(v);
       } catch (err) {
         console.error(err);
         v = [ -Infinity ];
@@ -145,6 +139,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let u = q;
 
+    m = form.querySelector('[name="L"]');
+    lumi = parseFloat(m.value);
+    if (!(lumi > 0)) {
+      lumi = 0;
+      m.value = '';
+    } else {
+      v = `${lumi}`;
+      m.value = v;
+      u += '&L='+v;
+    }
+
     m = form.querySelector('[name="method"]');
     const method = m.value;
     u += '&method='+method;
@@ -166,11 +171,11 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     for (const row of [[
       '','[105,160]','[121,129]','MC unc.','cnt. unc.',
-      '[105,121)','(129,160]','[121,129]','fit unc.','cnt. unc.',
+      '[105,121]','[129,160]','[121,129]','fit unc.','cnt. unc.',
       'signif','signif','','reco'
     ],[
       'bin','sig','sig','\u221a\u2211w\u00B2','\u221asig',
-      'L bkg','R bkg','bkg','','\u221abkg',
+      'L data','R data','bkg','','\u221abkg',
       's/\u221a(s+b)','Cowan','s/(s+b)','purity'
     ]]) {
       const tr = $(table,'tr');
@@ -182,48 +187,85 @@ document.addEventListener('DOMContentLoaded', () => {
     resize_table();
 
     fetch('req.php'+q, { method: 'GET' })
-    .then(r => r.json())
+    .then(r => {
+      try {
+        return r.json();
+      } catch (e) {
+        console.log(r.text());
+        throw e;
+      }
+    })
     .then(r => {
       console.log(r);
       _id('time').textContent = `(${r['time'].toFixed(2)} sec)`;
+
       const edges = r.edges.map(x => x==='inf' ? '∞' : x==='-inf' ? '-∞' : x);
+
+      let lumi_factor = 1;
+      if (lumi===0)
+        form.querySelector('[name="L"]').value = lumi = r.lumi;
+      let data_lumi_text = '';
+      if (r.lumi!==lumi) {
+        lumi_factor = lumi / r.lumi;
+        data_lumi_text = `(scaled from ${r.lumi} ifb)`;
+      }
+      _id('data_lumi').textContent = data_lumi_text;
+
+      table.childNodes[0].childNodes[7].textContent =
+        method==='bkg_rew' ? 'reweighted' :
+        method==='sig_reg' ? '[121,129]'  : '';
 
       for (const [b,bin] of enumerate(r.bins)) {
         const tr = $(table,'tr');
         $(tr,'td').textContent = `[${edges[b]},${edges[b+1]})`;
-        { let sum_all=0, sum_sig=0;
-          const hist = bin.S.hist,
-                n3 = hist.length,
-                n1 = n3*(121-105)/(160-105),
-                n2 = n3*(129-105)/(160-105);
-          for (const x of hist)
-            sum_all += x;
-          for (let i=n1; i<n2; ++i)
-            sum_sig += hist[i];
-          sum_all *= lumi;
-          sum_sig *= lumi;
-          $(tr,'td').textContent = sum_all.toFixed(2);
-          $(tr,'td').textContent = sum_sig.toFixed(2);
-          $(tr,'td');
-          $(tr,'td').textContent = (100*Math.sqrt(sum_sig)/sum_sig).toFixed(2)+'%';
+        let sig_all=0, sig_mid=0;
+        let hist = bin.S.hist,
+            n3 = hist.length,
+            n1 = n3*(121-105)/(160-105),
+            n2 = n3*(129-105)/(160-105);
+        for (const x of hist)
+          sig_all += x;
+        for (let i=n1; i<n2; ++i)
+          sig_mid += hist[i];
+        sig_all *= lumi;
+        sig_mid *= lumi;
+        const sig =
+          method==='bkg_rew' ? sig_all :
+          method==='sig_reg' ? sig_mid  : 0;
+        $(tr,'td').textContent = sig_all.toFixed(2);
+        $(tr,'td').textContent = sig_mid.toFixed(2);
+        $(tr,'td').textContent = (100*bin.S.rootw2*lumi/sig).toFixed(2)+'%';
+        $(tr,'td').textContent = (100*Math.sqrt(sig_all)/sig).toFixed(2)+'%';
+
+        let Lbkg=0, Rbkg=0;
+        hist = bin.B.hist;
+        n3 = hist.length*(160-105)/(121-105+160-129);
+        n1 = n3*(121-105)/(160-105);
+        n2 = n3 - n3*(129-121)/(160-105);
+        let i=0;
+        for (; i<n1; ++i) Lbkg += hist[i];
+        for (; i<n2; ++i) Rbkg += hist[i];
+        if (lumi_factor!==1) {
+          Lbkg = (Lbkg*lumi_factor).toFixed(2);
+          Rbkg = (Rbkg*lumi_factor).toFixed(2);
         }
-        { let Lbkg=0, bkg=0, Rbkg=0;
-          const hist = bin.B.hist,
-                n3 = hist.length*(160-105)/(121-105+160-129),
-                n1 = n3*(121-105)/(160-105),
-                n2 = n3 - n3*(129-121)/(160-105);
-          let i=0;
-          for (; i<n1; ++i) Lbkg += hist[i];
-          for (; i<n2; ++i) Rbkg += hist[i];
-          $(tr,'td').textContent = Lbkg.toFixed(0);
-          $(tr,'td').textContent = Rbkg.toFixed(0);
-          $(tr,'td').textContent =  bkg.toFixed(0);
-          $(tr,'td');
-          $(tr,'td').textContent = '%';
-        }
+        $(tr,'td').textContent = Lbkg;
+        $(tr,'td').textContent = Rbkg;
+        const bkg =
+          method==='bkg_rew' ? bin.B.rew :
+          method==='sig_reg' ? ''  : '';
+        $(tr,'td').textContent = bkg.toFixed(2);
         $(tr,'td');
-        $(tr,'td');
-        $(tr,'td');
+        $(tr,'td').textContent = (100*Math.sqrt(bkg)/bkg).toFixed(2)+'%';
+        let signif = sig/Math.sqrt(sig+bkg);
+        $(tr,'td',{style:{'font-weight':'bold',color:
+          '#006600'
+        }}).textContent = signif.toFixed(2);
+        signif = Math.sqrt(2*( (sig+bkg)*Math.log(1+sig/bkg)-sig ));
+        $(tr,'td',{style:{'font-weight':'bold',color:
+          '#006600'
+        }}).textContent = signif.toFixed(2);
+        $(tr,'td').textContent = (100*sig/(sig+bkg)).toFixed(2)+'%';
         $(tr,'td');
       }
       resize_table();

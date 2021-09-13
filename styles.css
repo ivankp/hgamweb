@@ -29,7 +29,7 @@ input[name="edges"] {
   vertical-align: middle;
   display: none;
 }
-#time {
+#time, #data_lumi {
   margin-left: 4px;
   font-size: small;
   color: #999;

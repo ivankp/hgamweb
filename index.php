@@ -43,7 +43,7 @@ const vars = <?php
 <form id="q">
   <div>
     <label>Luminosity:<input name="L" type="text" size="6">ifb</label>
-    <span id="true_lumi"></span>
+    <span id="data_lumi"></span>
   </div><div>
     <select name="H"></select>
     <select name="V"></select>
