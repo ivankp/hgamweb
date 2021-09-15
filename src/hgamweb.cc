@@ -15,6 +15,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <gsl/gsl_multimin.h>
+
 #include "linalg.hh"
 #include "wls.hh"
 #include "json.hh"
@@ -104,7 +106,7 @@ auto pool(auto... n) -> pool_array<T,sizeof...(n)> {
   if constexpr (zero)
     m = reinterpret_cast<T*>(calloc((n + ...),sizeof(T)));
   else
-    m = reinterpret_cast<T*>(malloc((n + ...),sizeof(T)));
+    m = reinterpret_cast<T*>(malloc((n + ...)*sizeof(T)));
   return {{ ( m+=n, m-n ) ... }};
 }
 
@@ -121,7 +123,7 @@ struct stream_decorator {
 
 template <typename F> // n ≥ 1
 double simpson(double a, double b, unsigned n, F&& f) {
-  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = f(a2);
+  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = f(h2);
   for (unsigned i=1; i<n; ++i) {
     double x = a + h*i;
     sum1 += f(x);
@@ -135,6 +137,104 @@ double poly(double x, const double* c, unsigned n) {
   double f = *c, y = 1;
   while (++c < end) f += *c*(y*=x);
   return f;
+}
+
+struct tail_logL_params {
+  double μ, σ;
+  const double *hist;
+  unsigned n;
+};
+double tail_logL(const gsl_vector* point, void* params) {
+  auto [ μ, σ, ws, nw ] = *reinterpret_cast<const tail_logL_params*>(params);
+  const double
+    α = gsl_vector_get(point,0),
+    p = gsl_vector_get(point,1),
+    eα = std::exp(-0.5*α*α),
+    pα = p/α;
+
+  auto f = [=](double t) -> double {
+    return t > α
+    ? eα * std::pow( (pα-α+t)/pα, -p )
+    : std::exp(-0.5*t*t);
+  };
+
+  // TODO: fit left tail too
+  ws += nw*(125-105)/(160-105);
+  const double xmax = (160-125), tmax = (xmax-μ)/σ;
+
+  double wtot = 0, Itot = 0, logL = 0;
+
+  const unsigned
+    ni = nw*(160-125)/(160-105),
+    nj = std::max(4*(160-105)/nw,1u); // at least 4 integration steps per GeV
+  const double h=tmax/(ni*nj), h2=h/2;
+  double sum1=0, sum2=f(h2), fa=f(0), fb;
+
+  for (unsigned i=0; i<ni; ++i) { // loop over bins
+    for (unsigned j=1; j<nj; ++j) { // loop over integration segments
+      const double t = h*(j+nj*i);
+      sum1 += f(t);
+      sum2 += f(t+h2);
+    }
+    fb = f(tmax);
+    const double I = h/6 * (fa + fb + sum1*2 + sum2*4); // simpson
+    const double w = ws[i];
+    Itot += I;
+    logL -= w * std::log(I);
+    wtot += w;
+    fa = fb;
+  }
+
+  return logL + wtot * std::log(Itot);
+}
+void fit_tails(
+  const double* mS, const double* histS,
+  unsigned nbins, unsigned nm, unsigned nS
+) {
+  // https://www.gnu.org/software/gsl/doc/html/multimin.html
+  gsl_vector *point = gsl_vector_alloc(2),
+             *step  = gsl_vector_alloc(2);
+
+  tail_logL_params params;
+  params.n = nS;
+
+  gsl_multimin_function minex_func;
+  minex_func.n = 2;
+  minex_func.f = tail_logL;
+  minex_func.params = &params;
+
+  gsl_multimin_fminimizer *minimizer = gsl_multimin_fminimizer_alloc(
+    gsl_multimin_fminimizer_nmsimplex2, 2);
+  gsl_multimin_fminimizer_set(minimizer, &minex_func, point, step);
+
+  for (unsigned b=0; b<nbins; ++b) { // loop over var bins
+    gsl_vector_set(point, 0, 1.5); gsl_vector_set(point, 1, 5.0);
+    gsl_vector_set(step , 0, 0.2); gsl_vector_set(step , 1, 1.0);
+
+    const double* m = mS+nm*b;
+    params.μ = m[1];
+    params.σ = m[2];
+    params.hist = histS+nS*b;
+
+    int status;
+    double size;
+    for (unsigned iter=0;;) {
+      status = gsl_multimin_fminimizer_iterate(minimizer);
+      if (status) break;
+      size = gsl_multimin_fminimizer_size(minimizer);
+      status = gsl_multimin_test_size(size,1e-2);
+      printf("%5d %10.3e %10.3e f() = %7.3f size = %.3f\n",
+        iter,
+        gsl_vector_get(point,0),
+        gsl_vector_get(point,1),
+        minimizer->fval, size);
+      if (status != GSL_CONTINUE || ++iter > 100) break;
+    }
+  }
+
+  gsl_multimin_fminimizer_free(minimizer);
+  gsl_vector_free(step);
+  gsl_vector_free(point);
 }
 
 int main(int argc, char* argv[]) {
@@ -236,7 +336,7 @@ int main(int argc, char* argv[]) {
   // background fit (weighted least squares) ------------------------
   const bool fitexp = card["Bf"].get<std::string>() == "exppoly";
   { const unsigned nB2 = nb[0]+nb[2];
-    const auto [ ys, us, A ] = pool<double>( nB2, nB2, nB2*nc );
+    const auto [ ys, us, A ] = pool<double,false>( nB2, nB2, nB2*nc );
     std::fill(A, A+nB2, 1.);
     const std::string& Bf = card["Bf"];
     if (!fitexp) { // fit polynomial
@@ -304,48 +404,7 @@ int main(int argc, char* argv[]) {
   }
 
   // fit signal tails -----------------------------------------------
-  for (unsigned b=0; b<nbins; ++b) { // loop over var bins
-    double μ, // TODO: define μ, σ, α, p
-           σ,
-           α,
-           p;
-    double eα = std::exp(-0.5*α*α);
-    double pα = p/α;
-
-    auto f = [=](double t) -> double {
-      return t > α
-      ? eα * std::pow( (pα-α+t)/pα, -p )
-      : std::exp(-0.5*t*t);
-    };
-
-    // TODO: fit left tail too
-    const double *w = histS + nS*(125-105)/(160-105);
-    double xmax = 35;
-
-    double wtot = 0, Itot = 0, logL = 0;
-
-    const unsigned ni = nS*(160-125)/(160-105), nj=2;
-    const double h=xmax/(ni*nj), h2=h/2;
-    double sum1=0, sum2=f(h2), fa=f(0), fb;
-
-    for (unsigned i=0; i<ni; ++i) { // loop over bins
-      for (unsigned j=1; j<nj; ++j) { // loop over integration segments
-        const double t = ((h*j)-μ)/σ;
-        sum1 += f(t);
-        sum2 += f(t+h2);
-      }
-      fb = f(b);
-      const double I = h/6 * (fa + fb + sum1*2 + sum2*4); // simpson
-      const double w = w[i];
-      Itot += I;
-      logL -= w * std::log(I);
-      wtot += w;
-      fa = fb;
-    }
-    logL += wtot * std::log(Itot);
-
-    // TODO: minimize logL
-  }
+  fit_tails(mS, histS, nbins, nm, nS);
 
   // JSON output ----------------------------------------------------
   stream_decorator out {

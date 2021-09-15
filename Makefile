@@ -2,8 +2,8 @@
 
 ifeq (0, $(words $(findstring $(MAKECMDGOALS), clean))) #############
 
-CFLAGS := -Wall -O3 -flto -fmax-errors=3 -Iinclude
-# CFLAGS := -Wall -O0 -g -fmax-errors=3 -Iinclude
+# CFLAGS := -Wall -O3 -flto -fmax-errors=3 -Iinclude
+CFLAGS := -Wall -O0 -g -fmax-errors=3 -Iinclude
 CXXFLAGS := -std=c++20 $(CFLAGS)
 
 # generate .d files during compilation
@@ -18,10 +18,11 @@ EXE := $(shell $(FIND_MAIN))
 all: $(EXE)
 
 bin/hgamweb: $(patsubst %, .build/%.o, linalg wls json)
-LF_hgamweb := -static -static-libstdc++ -static-libgcc
-# L_hgamweb :=
+# C_hgamweb := -ffast-math
+# LF_hgamweb := -static -static-libstdc++ -static-libgcc
+L_hgamweb := -lgsl -lgslcblas
 
-STRIP := hgamweb
+# STRIP := hgamweb
 
 #####################################################################
 
