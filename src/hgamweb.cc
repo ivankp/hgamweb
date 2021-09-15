@@ -97,10 +97,14 @@ namespace std {
   template <size_t I, typename T, size_t N>
   struct tuple_element<I,pool_array<T,N>> { using type = T*; };
 }
-template <typename T>
+template <typename T, bool zero>
 auto pool(auto... n) -> pool_array<T,sizeof...(n)> {
   // T* m = new T[(n + ...)];
-  T* m = reinterpret_cast<T*>(calloc((n + ...),sizeof(T)));
+  T* m;
+  if constexpr (zero)
+    m = reinterpret_cast<T*>(calloc((n + ...),sizeof(T)));
+  else
+    m = reinterpret_cast<T*>(malloc((n + ...),sizeof(T)));
   return {{ ( m+=n, m-n ) ... }};
 }
 
@@ -115,20 +119,16 @@ struct stream_decorator {
   }
 };
 
-template <typename F>
+template <typename F> // n ≥ 1
 double simpson(double a, double b, unsigned n, F&& f) {
-  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = 0;
-  for (unsigned i=0; i<n; ++i)
-    sum1 += f(a + h*i + h2);
-  for (unsigned i=1; i<n; ++i)
-    sum2 += f(a + h*i);
-  return h/6 * (f(a) + f(b) + 4*sum1 + 2*sum2);
+  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = f(a2);
+  for (unsigned i=1; i<n; ++i) {
+    double x = a + h*i;
+    sum1 += f(x);
+    sum2 += f(x+h2);
+  }
+  return h/6 * (f(a) + f(b) + sum1*2 + sum2*4);
 }
-
-// constexpr double root2pi = M_SQRT2*2/M_2_SQRTPI;
-// double gaus(double x, double μ, double σ) {
-//   return std::exp(-0.5*sq((x-μ)/σ))/(σ*root2pi);
-// }
 
 double poly(double x, const double* c, unsigned n) {
   const double *end = c+n;
@@ -158,9 +158,10 @@ int main(int argc, char* argv[]) {
     nS = (unsigned)card["Sdiv"] * (160-105),
     nB = (unsigned)card["Bdiv"] * (160-105),
     nV = card["nV"],
-    nc = (unsigned)card["Bdeg"]+1;
+    nc = (unsigned)card["Bdeg"]+1,
+    ncS = 6;
 
-  const unsigned nb[3] {
+  const unsigned nb[] {
     nB*(121-105)/(160-105),
     nB*(129-121)/(160-105),
     nB*(160-129)/(160-105)
@@ -168,13 +169,14 @@ int main(int argc, char* argv[]) {
 
   // allocate arrays ------------------------------------------------
   const auto [
-    edges  , histS   , mS      , w2S  , histB   , histVfine, histV, cB      ,
-    bkg    , rewbkg
-  ] = pool<double>(
-    nbins+1, nS*nbins, nm*nbins, nbins, nB*nbins, nV       , nbins, nc*nbins,
-    nbins  , nbins
+    edges  , histS   , mS       , w2S  , histB   , histVfine, histV, cB      ,
+    bkg    , rewbkg  , cS
+  ] = pool<double,true>(
+    nbins+1, nS*nbins, nm*nbins , nbins, nB*nbins, nV       , nbins, nc*nbins,
+    nbins  , nbins   , ncS*nbins
   );
 
+  // parse edges ----------------------------------------------------
   { const ivanp::json::array_t& xs = card["edges"];
     for (unsigned i=0; i<=nbins; ++i) {
       const auto& x = xs[i];
@@ -231,13 +233,6 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // signal distribution moments ------------------------------------
-  for (double* m = mS+nm*nbins; m!=mS; ) {
-    m -= nm;
-    m[1] /= m[0];
-    m[2] = std::sqrt(m[2]/m[0] - m[1]*m[1]);
-  }
-
   // background fit (weighted least squares) ------------------------
   const bool fitexp = card["Bf"].get<std::string>() == "exppoly";
   { const unsigned nB2 = nb[0]+nb[2];
@@ -261,7 +256,7 @@ int main(int argc, char* argv[]) {
 
         // integration
         const double *m = mS + b*nm, *c = cB + b*nc;
-        bkg[b] = simpson(-4,4,50,[=](double x){
+        bkg[b] = simpson(-4,4,10,[=](double x){
           return poly(x,c,nc);
         });
         rewbkg[b] = simpson(-20,35,50,[=](double x){
@@ -286,11 +281,12 @@ int main(int argc, char* argv[]) {
           for (unsigned k=1; k<nc; ++k)
             *(a+=nB2) = (f*=x);
         }
-        ivanp::wls(A, ys, us, nB2, nc, cB+b*nc);
+        double *m = mS + b*nm, *c = cB + b*nc;
+
+        ivanp::wls(A, ys, us, nB2, nc, c);
 
         // integration
-        const double *m = mS + b*nm, *c = cB + b*nc;
-        bkg[b] = simpson(-4,4,50,[=](double x){
+        bkg[b] = simpson(-4,4,10,[=](double x){
           return std::exp(poly(x,c,nc));
         });
         rewbkg[b] = simpson(-20,35,50,[=](double x){
@@ -298,6 +294,57 @@ int main(int argc, char* argv[]) {
         });
       }
     }
+  }
+
+  // signal distribution moments ------------------------------------
+  for (double* m = mS+nm*nbins; m!=mS; ) {
+    m -= nm;
+    m[1] /= m[0];
+    m[2] = std::sqrt(m[2]/m[0] - m[1]*m[1]);
+  }
+
+  // fit signal tails -----------------------------------------------
+  for (unsigned b=0; b<nbins; ++b) { // loop over var bins
+    double μ, // TODO: define μ, σ, α, p
+           σ,
+           α,
+           p;
+    double eα = std::exp(-0.5*α*α);
+    double pα = p/α;
+
+    auto f = [=](double t) -> double {
+      return t > α
+      ? eα * std::pow( (pα-α+t)/pα, -p )
+      : std::exp(-0.5*t*t);
+    };
+
+    // TODO: fit left tail too
+    const double *w = histS + nS*(125-105)/(160-105);
+    double xmax = 35;
+
+    double wtot = 0, Itot = 0, logL = 0;
+
+    const unsigned ni = nS*(160-125)/(160-105), nj=2;
+    const double h=xmax/(ni*nj), h2=h/2;
+    double sum1=0, sum2=f(h2), fa=f(0), fb;
+
+    for (unsigned i=0; i<ni; ++i) { // loop over bins
+      for (unsigned j=1; j<nj; ++j) { // loop over integration segments
+        const double t = ((h*j)-μ)/σ;
+        sum1 += f(t);
+        sum2 += f(t+h2);
+      }
+      fb = f(b);
+      const double I = h/6 * (fa + fb + sum1*2 + sum2*4); // simpson
+      const double w = w[i];
+      Itot += I;
+      logL -= w * std::log(I);
+      wtot += w;
+      fa = fb;
+    }
+    logL += wtot * std::log(Itot);
+
+    // TODO: minimize logL
   }
 
   // JSON output ----------------------------------------------------
