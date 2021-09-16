@@ -198,23 +198,23 @@ void fit_tails(
   tail_logL_params params;
   params.n = nS;
 
-  gsl_multimin_function minex_func;
-  minex_func.n = 2;
-  minex_func.f = tail_logL;
-  minex_func.params = &params;
+  gsl_multimin_function fcn;
+  fcn.n = 2;
+  fcn.f = tail_logL;
+  fcn.params = &params;
 
   gsl_multimin_fminimizer *minimizer = gsl_multimin_fminimizer_alloc(
     gsl_multimin_fminimizer_nmsimplex2, 2);
-  gsl_multimin_fminimizer_set(minimizer, &minex_func, point, step);
 
-  for (unsigned b=0; b<nbins; ++b) { // loop over var bins
+  for (;;) { // loop over var bins
     gsl_vector_set(point, 0, 1.5); gsl_vector_set(point, 1, 5.0);
     gsl_vector_set(step , 0, 0.2); gsl_vector_set(step , 1, 1.0);
 
-    const double* m = mS+nm*b;
-    params.μ = m[1];
-    params.σ = m[2];
-    params.hist = histS+nS*b;
+    params.μ = mS[1];
+    params.σ = mS[2];
+    params.hist = histS;
+
+    gsl_multimin_fminimizer_set(minimizer, &fcn, point, step);
 
     int status;
     double size;
@@ -230,6 +230,10 @@ void fit_tails(
         minimizer->fval, size);
       if (status != GSL_CONTINUE || ++iter > 100) break;
     }
+    if (--nbins) {
+      mS += nm;
+      histS += nS;
+    } else break;
   }
 
   gsl_multimin_fminimizer_free(minimizer);
@@ -261,6 +265,11 @@ int main(int argc, char* argv[]) {
     nc = (unsigned)card["Bdeg"]+1,
     ncS = 6;
 
+  if (!nbins || nbins>100) {
+    cerr << "nbins = " << nbins << '\n';
+    return 1;
+  }
+
   const unsigned nb[] {
     nB*(121-105)/(160-105),
     nB*(129-121)/(160-105),
@@ -282,7 +291,7 @@ int main(int argc, char* argv[]) {
       const auto& x = xs[i];
       double v;
       if (x.is_string())
-        v = std::stod(x.get<ivanp::json::string_t>());
+        v = std::stod(x.get<const ivanp::json::string_t&>());
       else
         v = x;
       edges[i] = v;
@@ -334,7 +343,7 @@ int main(int argc, char* argv[]) {
   }
 
   // background fit (weighted least squares) ------------------------
-  const bool fitexp = card["Bf"].get<std::string>() == "exppoly";
+  const bool fitexp = card["Bf"].get<const std::string&>() == "exppoly";
   { const unsigned nB2 = nb[0]+nb[2];
     const auto [ ys, us, A ] = pool<double,false>( nB2, nB2, nB2*nc );
     std::fill(A, A+nB2, 1.);
@@ -402,6 +411,22 @@ int main(int argc, char* argv[]) {
     m[1] /= m[0];
     m[2] = std::sqrt(m[2]/m[0] - m[1]*m[1]);
   }
+
+  // ----------------------------------------------------------------
+  // { tail_logL_params p;
+  //   p.μ = mS[1];
+  //   p.σ = mS[2];
+  //   gsl_vector *point = gsl_vector_alloc(2);
+  //   for (int i=1; i<11; ++i) {
+  //     const double α = 0.25*i;
+  //     gsl_vector_set(point, 0, α);
+  //     for (int j=0; j<10; ++j) {
+  //       const double n = 1.0+0.5*j;
+  //       gsl_vector_set(point, 1, n);
+  //       tail_logL(point,&p);
+  //     }
+  //   }
+  // }
 
   // fit signal tails -----------------------------------------------
   fit_tails(mS, histS, nbins, nm, nS);

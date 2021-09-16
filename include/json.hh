@@ -169,10 +169,13 @@ struct json {
     }
   }
 
+  // TODO: deduce reference type automatically
+
   template <typename T>
   void get(T& x) const {
     if constexpr (std::is_arithmetic_v<T>)
-      x = get<T>();
+      x = get<const T&>(); // TODO: make sure this is efficient
+      // TODO: allow move?
     else
       json_converter<std::remove_cv_t<T>>::from_json(*this,x);
   }
@@ -181,7 +184,7 @@ struct json {
   template <typename T>
   operator T() const { return get<T>(); }
 
-  operator std::string_view() const { return get<string_t>(); }
+  operator std::string_view() const { return get<const string_t&>(); }
   // ----------------------------------------------------------------
 };
 
