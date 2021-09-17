@@ -1,10 +1,10 @@
 #include <iostream>
-#include <string>
-#include <string_view>
 #include <type_traits>
 #include <limits>
 #include <vector>
 #include <algorithm>
+#include <stdexcept>
+#include <cerrno>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -48,8 +48,9 @@ public:
   output_file(const char* filename, char h1)
   : buf(new float[buf_size]), p(buf)
   {
-    fd = ::open(filename, O_RDWR | O_CREAT | O_TRUNC, 644);
-    if (fd < 0) throw std::runtime_error("failed to open output file");
+    fd = ::open(filename, O_RDWR | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) throw std::runtime_error(cat(
+      "failed to open output file \"",filename,"\": ",std::strerror(errno) ));
 
     char head[16];
     std::fill(head,head+16,' ');
@@ -214,14 +215,14 @@ int main(int argc, char* argv[]) {
   VARJ(pT_j1,f_1e3)      VARJ(pT_j2,f_1e3)      VARJ(pT_j3,f_1e3)
   VARJ(yAbs_j1)          VARJ(yAbs_j2)
   VARJ(Dphi_j_j,f_abs)   VAR(Dphi_j_j_signed,nullptr,Float_t,"Dphi_j_j_30_signed")
-  VARJ(pT_jj,f_1e3)      VARJ(m_jj,f_1e3)
+  VAR (pT_jj,f_1e3)      VARJ(m_jj,f_1e3)
   VARJ(Dy_j_j,f_abs)
 
   VARJ(sumTau_yyj,f_1e3) VARJ(maxTau_yyj,f_1e3)
   VARJ(Dphi_yy_jj,f_abs) VAR(cosTS_yyjj,f_abs)
 
   VARJ(pT_yyj,f_1e3)     VARJ(m_yyj,f_1e3)
-  VARJ(pT_yyjj,f_1e3)    VARJ(m_yyjj,f_1e3)
+  VARJ(pT_yyjj,f_1e3)    VAR (m_yyjj,f_1e3)
 
 /*
 #define PHOTONS_PREF "HGamPhotonsAuxDyn."
