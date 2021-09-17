@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <stdexcept>
+#include <charconv>
 #include <cerrno>
 
 #include <unistd.h>
@@ -36,7 +37,8 @@ constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
 
 bool is_mc;
 double mc_factor;
-float lumi=0, weight, weight_j;
+double lumi_total=0, lumi_period[3] {0,0,0};
+float weight, weight_j;
 TTreeReader* reader_ptr;
 
 class output_file {
@@ -67,7 +69,7 @@ public:
     ::lseek(fd,0,SEEK_SET);
     ::read(fd,head,1);
 
-    float x = head[0]=='d' ? lumi : 1.f;
+    float x = head[0]=='d' ? lumi_total*1e-3 : 1;
     memcpy(head,&x,4);
     memcpy(head+4,&nevents,4);
 
@@ -223,7 +225,7 @@ int main(int argc, char* argv[]) {
   VARJ(sumTau_yyj,f_1e3) VARJ(maxTau_yyj,f_1e3)
   VARJ(Dphi_yy_jj,f_abs) VAR(cosTS_yyjj,f_abs)
 
-  VARJ(pT_yyj,f_1e3)     VARJ(m_yyj,f_1e3)
+  // VARJ(pT_yyj,f_1e3)     VARJ(m_yyj,f_1e3)
   VARJ(pT_yyjj,f_1e3)    VAR (m_yyjj,f_1e3)
 
 /*
@@ -244,15 +246,41 @@ int main(int argc, char* argv[]) {
   };
 */
 
+  // read data before MC
+  std::stable_sort(argv+2,argv+argc,[
+    re = ctre::search<R"(^(?:.*/)?data)">
+  ](const char* a, const char* b){
+    return (bool)re(b) < (bool)re(a);
+  });
+
   for (int argi=2; argi<argc; ++argi) {
-    cout << argv[argi] << endl;
-    TFile file(argv[argi]);
+    const char* const arg = argv[argi];
+    cout << '\n' << arg << endl;
+    TFile file(arg);
     if (file.IsZombie()) return 1;
 
-    if (auto m = ctre::match<
-      "(?:^.*/)?mc16([ade])\\."
-    >(argv[argi])) {
+    if (auto m = ctre::search<
+      R"(^(?:.*/)?data(\d{2})_.*_(\d+)ipb\.)"
+    >(arg)) {
+      is_mc = false;
+      cout << "DATA" << endl;
+
+      auto lumi_str = m.get<2>().to_view();
+      double lumi = 0;
+      std::from_chars(lumi_str.data(), lumi_str.data()+lumi_str.size(), lumi);
+      lumi_total += lumi;
+
+      auto year = m.get<1>().to_view();
+      if (year=="15" || year=="16") lumi_period[0] += lumi;
+      else if (year=="17")          lumi_period[1] += lumi;
+      else if (year=="18")          lumi_period[2] += lumi;
+
+    } else if (auto m = ctre::search<
+      R"(^(?:.*/)?mc16([ade])\.)"
+    >(arg)) {
       is_mc = true;
+      cout << "MC" << endl;
+
       for (auto* key : *file.GetListOfKeys()) {
         const std::string_view name = key->GetName();
         if (!(name.starts_with("CutFlow_") &&
@@ -264,14 +292,17 @@ int main(int argc, char* argv[]) {
         }
         cout << name << '\n';
         const double n_all = h->GetBinContent(3);
-        cout << h->GetXaxis()->GetBinLabel(3) << " = " << n_all << '\n';
-        mc_factor = 1e3/n_all;
-        cout << "MC factor = " << mc_factor << endl;
+        cout << h->GetXaxis()->GetBinLabel(3) << " = " << n_all << endl;
+        mc_factor = 1e3/n_all; // convert to cross section in fb
         break;
       }
-    } else if (auto m = ctre::match<
-      R"((?:^.*/)?data(\d{2})_.*\.DS\d+_(\d+)ipb\.)"
-    >(argv[argi])) {
+      auto period = m.get<1>().to_view();
+      if (period=="a") mc_factor *= lumi_period[0]/lumi_total; else
+      if (period=="d") mc_factor *= lumi_period[1]/lumi_total; else
+      if (period=="e") mc_factor *= lumi_period[2]/lumi_total;
+
+    } else {
+      throw std::runtime_error("unexpected input file name format");
     }
 
     TTreeReader reader("CollectionTree",&file);
@@ -319,8 +350,8 @@ int main(int argc, char* argv[]) {
       WRITE(yAbs_j1)
       WRITE(sumTau_yyj)
       WRITE(maxTau_yyj)
-      WRITE(pT_yyj)
-      WRITE(m_yyj)
+      // WRITE(pT_yyj)
+      // WRITE(m_yyj)
 
       /*
       const auto photons = select_photons(v_photons,myy);
