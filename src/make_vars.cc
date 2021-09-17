@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <ctre.hpp>
+
 #include <TFile.h>
 #include <TKey.h>
 #include <TTreeReader.h>
@@ -174,8 +176,8 @@ std::vector<TLorentzVector> select_jets(vec<T>& v) {
 */
 
 int main(int argc, char* argv[]) {
-  if (argc!=3) {
-    cout << "usage: " << argv[0] << " output_dir input.root\n";
+  if (argc<3) {
+    cout << "usage: " << argv[0] << " output_dir input.root ...\n";
     return 1;
   }
 
@@ -247,26 +249,29 @@ int main(int argc, char* argv[]) {
     TFile file(argv[argi]);
     if (file.IsZombie()) return 1;
 
-    is_mc = false;
-    for (auto* key : *file.GetListOfKeys()) {
-      const std::string_view name = key->GetName();
-      if (!(name.starts_with("CutFlow_") &&
-            name.ends_with("_noDalitz_weighted"))) continue;
-      TH1 *h = dynamic_cast<TH1*>(static_cast<TKey*>(key)->ReadObj());
-      if (!h) {
-        cerr << name << " is not a TH1\n";
-        return 1;
-      }
-      cout << name << '\n';
-      const double n_all = h->GetBinContent(3);
-      cout << h->GetXaxis()->GetBinLabel(3) << " = " << n_all << '\n';
-      mc_factor = 1e3/n_all;
-      cout << "MC factor = " << mc_factor << endl;
+    if (auto m = ctre::match<
+      "(?:^.*/)?mc16([ade])\\."
+    >(argv[argi])) {
       is_mc = true;
-      break;
-    }
-    if (!is_mc) {
-      // TODO: get lumi
+      for (auto* key : *file.GetListOfKeys()) {
+        const std::string_view name = key->GetName();
+        if (!(name.starts_with("CutFlow_") &&
+              name.ends_with("_noDalitz_weighted"))) continue;
+        TH1 *h = dynamic_cast<TH1*>(static_cast<TKey*>(key)->ReadObj());
+        if (!h) {
+          cerr << name << " is not a TH1\n";
+          return 1;
+        }
+        cout << name << '\n';
+        const double n_all = h->GetBinContent(3);
+        cout << h->GetXaxis()->GetBinLabel(3) << " = " << n_all << '\n';
+        mc_factor = 1e3/n_all;
+        cout << "MC factor = " << mc_factor << endl;
+        break;
+      }
+    } else if (auto m = ctre::match<
+      R"((?:^.*/)?data(\d{2})_.*\.DS\d+_(\d+)ipb\.)"
+    >(argv[argi])) {
     }
 
     TTreeReader reader("CollectionTree",&file);

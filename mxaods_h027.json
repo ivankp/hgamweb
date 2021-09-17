@@ -1,0 +1,68 @@
+[["/eos/atlas/atlascerngroupdisk/phys-higgs/HSG1/MxAOD/h027/",[
+["data15/",[
+  "data15_13TeV.DS1_3220ipb.physics_Main.MxAOD.p4205.h027.root"
+]],
+["data16/",[
+  "data16_13TeV.DS1_5407ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS2_5103ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS3_5259ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS4_5075ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS5_5298ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS6_5067ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data16_13TeV.DS7_1779ipb.physics_Main.MxAOD.p4205.h027.root"]],
+["data17/",[
+  "data17_13TeV.DS1_5185ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS2_5153ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS3_5036ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS4_5199ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS5_5081ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS6_5154ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS7_5050ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS8_5409ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data17_13TeV.DS9_3041ipb.physics_Main.MxAOD.p4205.h027.root"]],
+["data18/",[
+  "data18_13TeV.DS1_5084ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS2_5129ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS3_5181ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS4_5116ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS5_5057ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS6_5055ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS7_5104ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS8_5272ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS9_5207ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS10_5103ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS11_5253ipb.physics_Main.MxAOD.p4205.h027.root",
+  "data18_13TeV.DS12_1889ipb.physics_Main.MxAOD.p4205.h027.root"]],
+["mc16a/Nominal/",[
+  ["mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.root/",[
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.001.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.002.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.003.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.004.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.005.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.006.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.007.root",
+   "mc16a.PowhegPy8_NNLOPS_ggH125.MxAODDetailedNoSkim.e5607_s3126_r9364_p4180_h027.008.root"
+  ],
+  "mc16a.PowhegPy8EG_NNPDF30_VBFH125.MxAODDetailedNoSkim.e6970_s3126_r9364_p4180_h027.root",
+  "mc16a.PowhegPy8_WmH125J.MxAODDetailedNoSkim.e5734_s3126_r9364_p4207_h027.root",
+  "mc16a.PowhegPy8_WpH125J.MxAODDetailedNoSkim.e5734_s3126_r9364_p4207_h027.root",
+  "mc16a.PowhegPy8_ZH125J.MxAODDetailedNoSkim.e5743_s3126_r9364_p4207_h027.root",
+  "mc16a.PowhegPy8_ggZH125.MxAODDetailedNoSkim.e5762_s3126_r9364_p4207_h027.root",
+  ["mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.root/",[
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.001.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.002.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.003.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.004.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.005.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.006.root",
+   "mc16a.PowhegPy8_ttH125_fixweight.MxAODDetailedNoSkim.e7488_s3126_r9364_p4180_h027.007.root"
+  ],
+  "mc16a.PowhegPy8_bbH125.MxAODDetailedNoSkim.e6050_s3126_r9364_p4180_h027.root",
+  "mc16a.aMCnloPy8_tWH125.MxAODDetailedNoSkim.e7425_s3126_r9364_p4180_h027.root"
+]],
+["mc16d/Nominal/",[
+]],
+["mc16e/Nominal/",[
+]] ]]
+]

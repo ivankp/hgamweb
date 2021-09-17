@@ -252,7 +252,7 @@ int main(int argc, char* argv[]) {
   const auto start = clock::now();
 
   // read configuration string --------------------------------------
-  cout << argv[1] << endl;
+  // cout << argv[1] << endl;
   ivanp::json card(argv[1]);
 
   // get numbers of values ------------------------------------------

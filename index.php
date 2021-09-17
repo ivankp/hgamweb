@@ -72,7 +72,7 @@ const vars = <?php
   echo json_encode($a1);
 ?>;
 <?php
-  $f = file_get_contents('default_binning.json');
+  $f = file_get_contents('binning.json');
   if ($f) echo 'const default_binning = '.$f.";\n";
 ?>
 </script>
