@@ -1,0 +1,11 @@
+SSLRequireSSL
+AuthType shibboleth
+ShibRequireSession On
+
+ShibExportAssertion Off
+
+# Require shib-attr ADFS_GROUP atlas-active
+# Require shib-attr ADFS_GROUP atlas-active-members
+# Require shib-attr ADFS_GROUP atlas-phys-higgs-hgam-xsec
+Require shib-attr ADFS_GROUP atlas-current-physicists atlas-phys-higgs-hgam-xsec
+

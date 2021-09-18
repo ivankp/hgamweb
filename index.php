@@ -1,3 +1,4 @@
+<?php ini_set('zlib.output_compression', 1); ?>
 <!DOCTYPE html>
 <html lang="en-US">
 <head>
@@ -62,11 +63,11 @@ const vars = <?php
       $a2 = array();
       $d2 = scandir($f1);
       foreach($d2 as &$f2) {
-        if (preg_match('/^[^-]+/',$f2,$m) && is_file($f1.'/'.$f2)) {
-          $a2[] = $m[0];
+        if (preg_match('/^(.+)-(data|mc)$/',$f2,$m) && is_file($f1.'/'.$f2)) {
+          $a2[] = $m[1];
         }
       }
-      $a1[$f1] = array_unique($a2,SORT_REGULAR);
+      $a1[$f1] = array_values(array_unique($a2,SORT_REGULAR));
     }
   }
   echo json_encode($a1);
